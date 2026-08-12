@@ -12,7 +12,12 @@ export type ClientMessage =
       size: number
       mimeType: string
       totalChunks: number
+      chunkSize?: number
+      binary?: boolean
+      resume?: boolean
+      encrypted?: boolean
     }
+  | { type: 'file-status'; fileId: string; nextIndex: number }
   | { type: 'file-chunk'; fileId: string; index: number; data: string }
   | { type: 'file-cancel'; fileId: string }
 
@@ -23,6 +28,7 @@ export type ServerMessage =
   | { type: 'item'; item: RoomItem }
   | { type: 'items'; items: RoomItem[] }
   | { type: 'file-progress'; progress: FileProgress }
+  | { type: 'file-status'; fileId: string; nextIndex: number }
   | { type: 'pong' }
   | { type: 'room-closed' }
 

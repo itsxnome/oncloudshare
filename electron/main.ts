@@ -24,10 +24,15 @@ import type {
   Peer,
   FileProgress,
 } from './shared/types'
+import { checkForUpdates, openReleasesPage, type UpdateInfo } from './updater'
+import { autoUpdater } from 'electron-updater'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
+let updateTimer: NodeJS.Timeout | null = null
+let lastUpdateInfo: UpdateInfo | null = null
+let nativeUpdateAvailable = false
 
 const settings = createSettingsStore()
 const tunnel = new TunnelManager()
@@ -307,10 +312,8 @@ function registerIpc() {
   ipcMain.handle('transfer:resume', (_e, fileId: string) => share.resumeTransfer(fileId))
   ipcMain.handle('transfer:cancel', (_e, fileId: string) => share.cancelTransfer(fileId))
   ipcMain.handle('transfer:list', () => share.listTransfers())
-  ipcMain.handle('files:sendPath', async (_e, filePath: string) => {
-    const buf = fs.readFileSync(filePath)
-    const name = path.basename(filePath)
-    await share.sendFileFromBuffer(name, 'application/octet-stream', buf)
+  ipcMain.handle('files:sendPath', async (_e, filePath: string, name?: string, mimeType?: string) => {
+    await share.sendFileFromPath(filePath, name, mimeType)
   })
   ipcMain.handle('files:sendBuffer', async (_e, payload: { name: string; mimeType: string; data: ArrayBuffer }) => {
     const buf = Buffer.from(payload.data)
@@ -390,6 +393,68 @@ function registerIpc() {
   ipcMain.handle('app:dismissFirstRun', () => {
     settings.set({ firstRunDone: true })
   })
+  ipcMain.handle('updates:check', async () => {
+    const info = await checkForUpdates()
+    lastUpdateInfo = info
+    return info
+  })
+  ipcMain.handle('updates:open', (_e, url?: string) => {
+    openReleasesPage(url || lastUpdateInfo?.releaseUrl)
+  })
+  ipcMain.handle('updates:dismiss', (_e, version: string) => {
+    settings.set({ dismissedUpdateVersion: version })
+    return settings.get()
+  })
+  ipcMain.handle('updates:getCached', () => lastUpdateInfo)
+  ipcMain.handle('updates:downloadAndInstall', async () => {
+    if (!nativeUpdateAvailable) {
+      openReleasesPage(lastUpdateInfo?.releaseUrl)
+      return { ok: false, error: 'Installer update is unavailable; opened GitHub Releases instead.' }
+    }
+    try {
+      await autoUpdater.downloadUpdate()
+      autoUpdater.quitAndInstall()
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Update download failed' }
+    }
+  })
+}
+
+async function runUpdateCheck(notifyUser: boolean) {
+  try {
+    if (app.isPackaged) {
+      try {
+        await autoUpdater.checkForUpdates()
+        if (nativeUpdateAvailable) return
+      } catch {
+        /* portable or missing feed: use GitHub release check below */
+      }
+    }
+    const info = await checkForUpdates()
+    lastUpdateInfo = info
+    send('update-available', info)
+    if (
+      notifyUser &&
+      info.updateAvailable &&
+      info.latestVersion &&
+      info.latestVersion !== settings.get().dismissedUpdateVersion
+    ) {
+      notify(
+        'Update available',
+        `OnCloudShare v${info.latestVersion} is ready — open the app banner to download.`,
+      )
+    }
+  } catch {
+    /* ignore network errors */
+  }
+}
+
+function scheduleUpdateChecks() {
+  void runUpdateCheck(true)
+  if (updateTimer) clearInterval(updateTimer)
+  // Recheck every 6 hours while the app is open
+  updateTimer = setInterval(() => void runUpdateCheck(true), 6 * 60 * 60 * 1000)
 }
 
 app.whenReady().then(async () => {
@@ -410,25 +475,57 @@ app.whenReady().then(async () => {
     getDownloadFolder: () => settings.get().downloadFolder,
     getPreferredPort: () => settings.get().preferredPort || 47891,
     getMaxFileBytes: () => {
-      const mb = settings.get().maxFileSizeMb || 2048
-      return Math.max(1, mb) * 1024 * 1024
+      const mb = settings.get().maxFileSizeMb
+      return mb <= 0 ? 0 : mb * 1024 * 1024
     },
+    getE2EEncryption: () => settings.get().e2eEncryption,
   })
 
   tunnel.setUnexpectedExitHandler(() => {
-    share.setTunnelState(
-      'expired',
-      null,
-      'Remote link ended (free tunnels expire when the helper stops). Regenerate a new link.',
-    )
+    const status = share.getStatus()
+    if (settings.get().autoRemoteOnCreate && status.role === 'host' && status.room) {
+      void (async () => {
+        share.setTunnelState('starting', null)
+        const result = await tunnel.startQuickTunnel(
+          status.port,
+          settings.get().cloudflaredPath || undefined,
+        )
+        if (result.ok && result.url) {
+          share.setTunnelState('active', result.url)
+          settings.set({ tunnelMode: 'cloudflare', manualTunnelUrl: result.url })
+        } else {
+          share.setTunnelState('expired', null, result.error || 'Remote link ended.')
+        }
+        refreshTray()
+      })()
+      return
+    }
+    share.setTunnelState('expired', null, 'Remote link ended. Regenerate a new link.')
     notify('Remote link expired', 'Generate a new link to keep sharing remotely')
     refreshTray()
+  })
+
+  autoUpdater.autoDownload = false
+  autoUpdater.on('update-available', (info) => {
+    nativeUpdateAvailable = true
+    lastUpdateInfo = {
+      updateAvailable: true,
+      currentVersion: app.getVersion(),
+      latestVersion: info.version,
+      releaseUrl: 'https://github.com/itsxnome/oncloudshare/releases/latest',
+      releaseName: info.releaseName ? String(info.releaseName) : undefined,
+    }
+    send('update-available', lastUpdateInfo)
+  })
+  autoUpdater.on('update-not-available', () => {
+    nativeUpdateAvailable = false
   })
 
   await share.start()
   registerIpc()
   createWindow()
   createTray()
+  scheduleUpdateChecks()
 
   globalShortcut.register('CommandOrControl+Shift+V', () => {
     void sendClipboard()
@@ -442,6 +539,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', async () => {
   quitting = true
+  if (updateTimer) clearInterval(updateTimer)
   globalShortcut.unregisterAll()
   await tunnel.stop()
   await share?.stop()

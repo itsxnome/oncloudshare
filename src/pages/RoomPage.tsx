@@ -77,6 +77,15 @@ export default function RoomPage({
     onError(null)
     try {
       for (const file of files) {
+        const filePath = window.oncloud.getPathForFile(file)
+        if (filePath) {
+          await window.oncloud.sendFilePath(
+            filePath,
+            file.name,
+            file.type || 'application/octet-stream',
+          )
+          continue
+        }
         const data = await file.arrayBuffer()
         await window.oncloud.sendFileBuffer({
           name: file.name,

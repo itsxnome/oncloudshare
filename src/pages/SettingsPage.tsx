@@ -122,18 +122,32 @@ export default function SettingsPage({ settings, status, onSaved, onError }: Pro
             <input
               className="input font-mono"
               type="number"
-              min={1}
+              min={0}
               max={20480}
-              value={form.maxFileSizeMb ?? 2048}
+              value={form.maxFileSizeMb ?? 0}
               onChange={(e) =>
-                setForm({ ...form, maxFileSizeMb: Math.max(1, Number(e.target.value) || 2048) })
+                setForm({ ...form, maxFileSizeMb: Math.max(0, Number(e.target.value) || 0) })
               }
-              onBlur={() => void savePartial({ maxFileSizeMb: form.maxFileSizeMb || 2048 })}
+              onBlur={() => void savePartial({ maxFileSizeMb: form.maxFileSizeMb })}
             />
             <p className="mt-1 text-xs text-muted">
-              Default 2048 MB (2 GB). Oversized files are blocked with a clear error.
+              Use 0 for unlimited (default). Set a positive value to enforce a room limit.
             </p>
           </div>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={form.e2eEncryption}
+              onChange={(e) => void savePartial({ e2eEncryption: e.target.checked })}
+            />
+            <span>
+              <span className="font-medium">Experimental chunk encryption</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                Requires a room PIN and matching support on both peers.
+              </span>
+            </span>
+          </label>
         </section>
 
         <section className="card space-y-4 p-5">

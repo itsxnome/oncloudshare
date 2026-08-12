@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AppSettings, DiscoveredRoom, FileProgress, Peer, RoomItem, ServerStatus } from './types'
+import type {
+  AppSettings,
+  DiscoveredRoom,
+  FileProgress,
+  Peer,
+  RoomItem,
+  ServerStatus,
+  UpdateInfo,
+} from './types'
 import HomePage from './pages/HomePage'
 import RoomPage from './pages/RoomPage'
 import SettingsPage from './pages/SettingsPage'
 import HistoryPage from './pages/HistoryPage'
 import FirstRunModal from './components/FirstRunModal'
 import Toast from './components/Toast'
+import UpdateBanner from './components/UpdateBanner'
 
 type Page = 'home' | 'room' | 'history' | 'settings'
 
@@ -20,14 +29,16 @@ export default function App() {
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [st, se, it] = await Promise.all([
+      const [st, se, it, cachedUpdate] = await Promise.all([
         window.oncloud.getStatus(),
         window.oncloud.getSettings(),
         window.oncloud.getItems(),
+        window.oncloud.getCachedUpdate(),
       ])
       if (!alive) return
       setStatus(st)
@@ -35,6 +46,10 @@ export default function App() {
       setItems(it)
       setPeers(st.peers)
       if (st.room) setPage('room')
+      if (cachedUpdate) setUpdateInfo(cachedUpdate)
+      void window.oncloud.checkForUpdates().then((info) => {
+        if (alive) setUpdateInfo(info)
+      })
     })()
 
     const offStatus = window.oncloud.onStatus((s) => {
@@ -51,6 +66,7 @@ export default function App() {
       setToast(n)
       setTimeout(() => setToast(null), n.title === 'Saved' ? 6000 : 3500)
     })
+    const offUpdate = window.oncloud.onUpdateAvailable(setUpdateInfo)
 
     const timer = setInterval(async () => {
       try {
@@ -68,6 +84,7 @@ export default function App() {
       offPeers()
       offProgress()
       offNotify()
+      offUpdate()
       clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,12 +100,33 @@ export default function App() {
     return 'LAN'
   }, [status])
 
+  const showUpdateBanner = Boolean(
+    updateInfo?.updateAvailable &&
+      updateInfo.latestVersion &&
+      updateInfo.latestVersion !== settings?.dismissedUpdateVersion,
+  )
+
   async function refreshSettings() {
     setSettings(await window.oncloud.getSettings())
   }
 
   return (
     <div className="flex h-full flex-col">
+      {showUpdateBanner && updateInfo?.latestVersion && (
+        <UpdateBanner
+          latestVersion={updateInfo.latestVersion}
+          currentVersion={updateInfo.currentVersion}
+          onInstall={() =>
+            void window.oncloud.downloadAndInstallUpdate().then((result) => {
+              if (!result.ok && result.error) setError(result.error)
+            })
+          }
+          onDismiss={async () => {
+            const next = await window.oncloud.dismissUpdate(updateInfo.latestVersion!)
+            setSettings(next)
+          }}
+        />
+      )}
       <header className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/20 text-accent">

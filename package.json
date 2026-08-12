@@ -1,6 +1,6 @@
 {
   "name": "oncloudshare",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local-first desktop sharing over LAN and tunnels",
   "main": "dist-electron/main.js",
   "author": "OnCloudShare",
@@ -11,9 +11,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
     "icons": "node scripts/generate-icon.js",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.js",
-    "electron:build": "npm run build && npm run icons && npm run fetch:cloudflared && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "electron:build": "npm run build && npm run icons && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "electron:build:win": "npm run electron:build",
     "electron:build:mac": "npm run build && npm run icons && electron-builder --mac",
     "electron:build:linux": "npm run build && npm run icons && electron-builder --linux",
@@ -23,6 +24,7 @@
   "dependencies": {
     "bonjour-service": "^1.3.0",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.1",
     "qrcode": "^1.5.4",
@@ -52,6 +54,7 @@
     "vite": "^6.0.7",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.1.10",
     "wait-on": "^8.0.1"
   },
   "build": {
@@ -63,17 +66,26 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "!resources/cloudflared*",
+      "!resources/*.download"
     ],
     "extraResources": [
       {
         "from": "resources",
         "to": "resources",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/cloudflared*",
+          "!**/*.download"
         ]
       }
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "itsxnome",
+      "repo": "oncloudshare"
+    },
     "win": {
       "target": [
         {

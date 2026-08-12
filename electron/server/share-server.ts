@@ -2,6 +2,7 @@ import os from 'os'
 import net from 'net'
 import http from 'http'
 import fs from 'fs'
+import path from 'path'
 import express from 'express'
 import multer from 'multer'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -9,18 +10,24 @@ import { randomBytes } from 'crypto'
 import { RoomManager } from './room-manager'
 import { parseClientMessage, type ServerMessage } from './ws-handler'
 import {
+  DiskFileAssembler,
   FileTransferAssembler,
-  writeBufferToFile,
+  decodeChunkFrame,
+  encodeChunkFrame,
+  ensureDir,
+  streamFileToCallback,
   uniquePath,
   CHUNK_SIZE,
 } from './file-transfer'
 import { DiscoveryService } from './discovery'
 import { TransferController } from './transfer-controller'
-import { resolveMobileIndex } from './mobile-path'
+import { resolveMobileIndex, resolveMobileFile } from './mobile-path'
+import { decryptChunk, deriveKey, encryptChunk } from './crypto-box'
 import type {
   Peer,
   RoomInfo,
   RoomItem,
+  FileItem,
   FileProgress,
   ServerStatus,
   JoinResult,
@@ -42,6 +49,7 @@ export type ShareServerCallbacks = {
   getDownloadFolder: () => string
   getPreferredPort: () => number
   getMaxFileBytes: () => number
+  getE2EEncryption: () => boolean
 }
 
 export function getLocalIps(): string[] {
@@ -84,6 +92,8 @@ export class ShareServer {
   private rooms = new RoomManager()
   private discovery = new DiscoveryService()
   private assembler = new FileTransferAssembler()
+  private stagingDir = path.join(os.tmpdir(), 'oncloudshare-staging')
+  private diskAssembler = new DiskFileAssembler(this.stagingDir)
   private transfers: TransferController
   private sockets = new Map<WebSocket, SocketState>()
   private port = 0
@@ -97,6 +107,8 @@ export class ShareServer {
   private connected = false
   private hostPeerId = ''
   private activeDownloads = new Map<string, Promise<{ ok: boolean; path?: string; error?: string }>>()
+  private fileStatusWaiters = new Map<string, (nextIndex: number) => void>()
+  private encryptedFileIds = new Set<string>()
   private lastJoinOpts: {
     code?: string
     host?: string
@@ -151,8 +163,13 @@ export class ShareServer {
         res.status(404).json({ error: 'File not found' })
         return
       }
+      const diskPath = entry.diskPath
       const buf = entry.buffer
-      const total = buf.length
+      if (!diskPath && !buf) {
+        res.status(404).json({ error: 'File data unavailable' })
+        return
+      }
+      const total = diskPath ? fs.statSync(diskPath).size : entry.item.size
       const mime = entry.item.mimeType || 'application/octet-stream'
       res.setHeader('Accept-Ranges', 'bytes')
       res.setHeader(
@@ -173,25 +190,38 @@ export class ShareServer {
           res.status(416).setHeader('Content-Range', `bytes */${total}`).end()
           return
         }
-        const chunk = buf.subarray(start, end + 1)
         res.status(206)
         res.setHeader('Content-Type', mime)
-        res.setHeader('Content-Length', chunk.length)
+        res.setHeader('Content-Length', end - start + 1)
         res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
-        res.send(chunk)
+        if (diskPath) {
+          fs.createReadStream(diskPath, { start, end }).pipe(res)
+        } else {
+          res.send(buf!.subarray(start, end + 1))
+        }
         return
       }
 
       res.setHeader('Content-Type', mime)
       res.setHeader('Content-Length', total)
-      res.send(buf)
+      if (diskPath) {
+        fs.createReadStream(diskPath).pipe(res)
+      } else {
+        res.send(buf)
+      }
     })
 
+    ensureDir(this.stagingDir)
     const upload = multer({
-      storage: multer.memoryStorage(),
-      limits: {
-        fileSize: 2 * 1024 * 1024 * 1024,
-      },
+      storage: multer.diskStorage({
+        destination: (_req, _file, done) => {
+          ensureDir(this.stagingDir)
+          done(null, this.stagingDir)
+        },
+        filename: (_req, file, done) =>
+          done(null, `upload-${Date.now()}-${randomBytes(5).toString('hex')}-${path.basename(file.originalname)}`),
+      }),
+      limits: this.cb.getMaxFileBytes() > 0 ? { fileSize: this.cb.getMaxFileBytes() } : undefined,
     })
 
     const safeUploadName = (raw: string | undefined, mime: string) => {
@@ -235,6 +265,17 @@ export class ShareServer {
     this.app.get('/', sendMobilePage)
     this.app.get('/m', sendMobilePage)
     this.app.get('/mobile', sendMobilePage)
+    this.app.get('/sw.js', (_req, res) => {
+      const file = resolveMobileFile('sw.js')
+      if (!file) {
+        res.status(404).type('text').send('Service worker missing')
+        return
+      }
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
+      res.setHeader('Service-Worker-Allowed', '/')
+      res.setHeader('Cache-Control', 'no-cache')
+      res.sendFile(file)
+    })
 
     this.app.post('/upload', (req, res) => {
       upload.single('file')(req, res, (err: unknown) => {
@@ -265,7 +306,7 @@ export class ShareServer {
             return
           }
           const file = req.file
-          if (!file || !file.buffer) {
+          if (!file || !file.path) {
             res.status(400).json({
               error:
                 'No file data received. On iPhone, use Attach if drag & drop fails.',
@@ -280,7 +321,7 @@ export class ShareServer {
             return
           }
           const max = this.cb.getMaxFileBytes()
-          if (file.size > max) {
+          if (max > 0 && Number.isFinite(max) && file.size > max) {
             res.status(413).json({
               error: `File exceeds the ${Math.round(max / (1024 * 1024))} MB limit`,
             })
@@ -290,16 +331,21 @@ export class ShareServer {
           const from = String(req.body?.peerId || randomBytes(4).toString('hex'))
           const mime = file.mimetype || 'application/octet-stream'
           const name = safeUploadName(file.originalname, mime)
-          const item = this.rooms.addFileMeta(
-            {
-              name,
-              size: file.size,
-              mimeType: mime,
-              from,
-              fromName,
-            },
-            file.buffer,
-          )
+          const fileMeta = {
+            name,
+            size: file.size,
+            mimeType: mime,
+            from,
+            fromName,
+          }
+          let item: FileItem
+          if (file.size > 8 * 1024 * 1024) {
+            item = this.rooms.addFileFromDisk(fileMeta, file.path)
+          } else {
+            const buffer = fs.readFileSync(file.path)
+            fs.unlinkSync(file.path)
+            item = this.rooms.addFileMeta(fileMeta, buffer)
+          }
           this.broadcast({ type: 'item', item })
           this.cb.onItems(this.rooms.items)
           try {
@@ -677,6 +723,11 @@ export class ShareServer {
     }
     this.rooms.clear()
     this.assembler = new FileTransferAssembler()
+    this.diskAssembler.clear()
+    fs.rmSync(this.stagingDir, { recursive: true, force: true })
+    ensureDir(this.stagingDir)
+    this.diskAssembler = new DiskFileAssembler(this.stagingDir)
+    this.encryptedFileIds.clear()
     this.role = 'idle'
     this.connected = false
     this.hostPeerId = ''
@@ -687,7 +738,7 @@ export class ShareServer {
 
   private assertFileSize(size: number, name: string) {
     const max = this.cb.getMaxFileBytes()
-    if (size > max) {
+    if (max > 0 && Number.isFinite(max) && size > max) {
       const maxMb = Math.round(max / (1024 * 1024))
       const sizeMb = (size / (1024 * 1024)).toFixed(1)
       throw new Error(
@@ -724,12 +775,110 @@ export class ShareServer {
     }
   }
 
+  async sendFileFromPath(
+    filePath: string,
+    name = path.basename(filePath),
+    mimeType = 'application/octet-stream',
+  ): Promise<void> {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile()) throw new Error('Selected path is not a file')
+    this.assertFileSize(stat.size, name)
+    const fileId = randomBytes(8).toString('hex')
+    const totalChunks = Math.ceil(stat.size / CHUNK_SIZE) || 1
+    this.transfers.start({ fileId, name, total: stat.size, direction: 'upload' })
+
+    if (this.role === 'host') {
+      await streamFileToCallback(
+        filePath,
+        CHUNK_SIZE,
+        async (index, data) => {
+          const ok = await this.transfers.waitIfPaused(fileId)
+          if (!ok || this.transfers.isCancelled(fileId)) throw new Error('cancelled')
+          this.transfers.setReceived(fileId, Math.min(stat.size, index * CHUNK_SIZE + data.length))
+        },
+        () => this.transfers.isCancelled(fileId),
+      )
+      const item = this.rooms.addFileFromDisk(
+        {
+          id: fileId,
+          name,
+          size: stat.size,
+          mimeType,
+          from: this.hostPeerId,
+          fromName: this.cb.getDisplayName(),
+        },
+        filePath,
+      )
+      this.transfers.complete(fileId, stat.size)
+      this.broadcast({ type: 'item', item })
+      this.cb.onItems(this.rooms.items)
+      this.cb.onNotification('File shared', `${name} is in the room`)
+      return
+    }
+
+    const ws = this.guestWs
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('Not connected to a room')
+    const nextIndexPromise = new Promise<number>((resolve) => {
+      const timer = setTimeout(() => {
+        this.fileStatusWaiters.delete(fileId)
+        resolve(0)
+      }, 3000)
+      this.fileStatusWaiters.set(fileId, (nextIndex) => {
+        clearTimeout(timer)
+        resolve(nextIndex)
+      })
+    })
+    ws.send(
+      JSON.stringify({
+        type: 'file-meta',
+        fileId,
+        name,
+        size: stat.size,
+        mimeType,
+        totalChunks,
+        chunkSize: CHUNK_SIZE,
+        binary: true,
+        resume: true,
+        encrypted: this.cb.getE2EEncryption() && Boolean(this.rooms.room?.pin),
+      }),
+    )
+    const nextIndex = await nextIndexPromise
+    await streamFileToCallback(
+      filePath,
+      CHUNK_SIZE,
+      async (index, data) => {
+        if (index < nextIndex) return
+        const ok = await this.transfers.waitIfPaused(fileId)
+        if (!ok || this.transfers.isCancelled(fileId)) throw new Error('cancelled')
+        const payload =
+          this.cb.getE2EEncryption() && this.rooms.room?.pin
+            ? encryptChunk(deriveKey(this.rooms.room.pin), data)
+            : data
+        await new Promise<void>((resolve, reject) => {
+          ws.send(encodeChunkFrame(fileId, index, payload), (error) =>
+            error ? reject(error) : resolve(),
+          )
+        })
+        this.transfers.setReceived(fileId, Math.min(stat.size, index * CHUNK_SIZE + data.length))
+      },
+      () => this.transfers.isCancelled(fileId),
+    )
+    this.transfers.complete(fileId, stat.size)
+  }
+
   async sendFileFromBuffer(
     name: string,
     mimeType: string,
     buffer: Buffer,
   ): Promise<void> {
     this.assertFileSize(buffer.length, name)
+    if (buffer.length > 8 * 1024 * 1024) {
+      ensureDir(this.stagingDir)
+      const tempPath = uniquePath(this.stagingDir, name)
+      fs.writeFileSync(tempPath, buffer)
+      await this.sendFileFromPath(tempPath, name, mimeType)
+      return
+    }
     if (this.role === 'host') {
       const fileId = randomBytes(8).toString('hex')
       this.transfers.start({
@@ -834,10 +983,11 @@ export class ShareServer {
   ): Promise<{ ok: boolean; path?: string; error?: string }> {
     const local = this.rooms.getFile(fileId)
     if (local) {
+      const total = local.diskPath ? fs.statSync(local.diskPath).size : local.item.size
       this.transfers.start({
         fileId,
         name: local.item.name,
-        total: local.buffer.length,
+        total,
         direction: 'download',
       })
       try {
@@ -846,24 +996,34 @@ export class ShareServer {
         this.transfers.setReceived(fileId, 0)
         // Give the UI a moment to paint the progress bar
         await new Promise((r) => setTimeout(r, 80))
-        const chunkSize = Math.max(32 * 1024, Math.floor(local.buffer.length / 20) || 32 * 1024)
+        const chunkSize = Math.max(32 * 1024, Math.floor(total / 20) || 32 * 1024)
         const fd = fs.openSync(dest, 'w')
         try {
-          for (let offset = 0; offset < local.buffer.length; offset += chunkSize) {
-            const ok = await this.transfers.waitIfPaused(fileId)
-            if (!ok || this.transfers.isCancelled(fileId)) {
-              fs.closeSync(fd)
-              try {
-                fs.unlinkSync(dest)
-              } catch {
-                /* ignore */
+          if (local.diskPath) {
+            let offset = 0
+            for await (const raw of fs.createReadStream(local.diskPath, { highWaterMark: CHUNK_SIZE })) {
+              const ok = await this.transfers.waitIfPaused(fileId)
+              if (!ok || this.transfers.isCancelled(fileId)) {
+                return { ok: false, error: 'Download cancelled' }
               }
-              return { ok: false, error: 'Download cancelled' }
+              const chunk = Buffer.from(raw)
+              fs.writeSync(fd, chunk, 0, chunk.length, offset)
+              offset += chunk.length
+              this.transfers.setReceived(fileId, offset)
             }
-            const end = Math.min(local.buffer.length, offset + chunkSize)
-            fs.writeSync(fd, local.buffer.subarray(offset, end))
-            this.transfers.setReceived(fileId, end)
-            await new Promise((r) => setTimeout(r, 16))
+          } else if (local.buffer) {
+            for (let offset = 0; offset < local.buffer.length; offset += chunkSize) {
+              const ok = await this.transfers.waitIfPaused(fileId)
+              if (!ok || this.transfers.isCancelled(fileId)) {
+                return { ok: false, error: 'Download cancelled' }
+              }
+              const end = Math.min(local.buffer.length, offset + chunkSize)
+              fs.writeSync(fd, local.buffer.subarray(offset, end))
+              this.transfers.setReceived(fileId, end)
+              await new Promise((r) => setTimeout(r, 16))
+            }
+          } else {
+            throw new Error('File data unavailable')
           }
         } finally {
           try {
@@ -876,7 +1036,7 @@ export class ShareServer {
         this.rooms.items = this.rooms.items.map((i) =>
           i.id === fileId && i.type === 'file' ? { ...i, path: dest } : i,
         )
-        this.transfers.complete(fileId, local.buffer.length)
+        this.transfers.complete(fileId, total)
         this.cb.onItems(this.rooms.items)
         this.cb.onNotification('Saved', dest)
         return { ok: true, path: dest }
@@ -913,50 +1073,34 @@ export class ShareServer {
       const params = new URLSearchParams({ code: this.rooms.room.code })
       if (this.rooms.room.pin) params.set('pin', this.rooms.room.pin)
       const url = `${this.guestHttpBase}/files/${fileId}?${params.toString()}`
-      const parts: Buffer[] = []
+      const dest = uniquePath(this.cb.getDownloadFolder(), item.name)
+      const response = await fetch(url)
+      if (!response.ok || !response.body) throw new Error(`Download failed (${response.status})`)
+      const fd = fs.openSync(dest, 'w')
       let offset = 0
-      const existingProgress = this.transfers.get(fileId)?.received || 0
-      // Resume from 0 for simplicity of buffer assembly; pause still works mid-loop
-      void existingProgress
-      const chunkSize = CHUNK_SIZE * 8
-
-      while (offset < item.size) {
-        const ok = await this.transfers.waitIfPaused(fileId)
-        if (!ok || this.transfers.isCancelled(fileId)) {
-          return { ok: false, error: 'Download cancelled' }
-        }
-        const end = Math.min(item.size - 1, offset + chunkSize - 1)
-        const res = await fetch(url, {
-          headers: { Range: `bytes=${offset}-${end}` },
-        })
-        if (!(res.status === 206 || res.status === 200)) {
-          throw new Error(`Download failed (${res.status})`)
-        }
-        const ab = await res.arrayBuffer()
-        const buf = Buffer.from(ab)
-        if (res.status === 200) {
-          parts.length = 0
-          parts.push(buf)
-          offset = buf.length
+      try {
+        const reader = response.body.getReader()
+        while (true) {
+          const ok = await this.transfers.waitIfPaused(fileId)
+          if (!ok || this.transfers.isCancelled(fileId)) {
+            await reader.cancel()
+            throw new Error('Download cancelled')
+          }
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = Buffer.from(value)
+          fs.writeSync(fd, chunk, 0, chunk.length, offset)
+          offset += chunk.length
           this.transfers.setReceived(fileId, offset)
-          break
         }
-        parts.push(buf)
-        offset += buf.length
-        this.transfers.setReceived(fileId, offset)
+      } finally {
+        fs.closeSync(fd)
       }
-
-      if (this.transfers.isCancelled(fileId)) {
-        return { ok: false, error: 'Download cancelled' }
-      }
-
-      const buffer = Buffer.concat(parts)
-      const dest = writeBufferToFile(this.cb.getDownloadFolder(), item.name, buffer)
-      this.rooms.storeFileBuffer(item.id, { ...item, path: dest }, buffer)
+      this.rooms.storeFilePath(item.id, { ...item, path: dest }, dest)
       this.rooms.items = this.rooms.items.map((i) =>
         i.id === fileId && i.type === 'file' ? { ...i, path: dest } : i,
       )
-      this.transfers.complete(fileId, buffer.length)
+      this.transfers.complete(fileId, offset)
       this.cb.onItems(this.rooms.items)
       this.cb.onNotification('Saved', dest)
       return { ok: true, path: dest }
@@ -987,7 +1131,28 @@ export class ShareServer {
 
   private handleConnection(ws: WebSocket) {
     this.sockets.set(ws, { peerId: '', name: '', joined: false })
-    ws.on('message', (raw) => {
+    ws.on('message', (raw, isBinary) => {
+      if (isBinary) {
+        const state = this.sockets.get(ws)
+        if (!state?.joined) return
+        const frame = decodeChunkFrame(Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer))
+        if (!frame) return
+        let payload = frame.data
+        if (this.encryptedFileIds.has(frame.fileId)) {
+          if (!this.rooms.room?.pin) return
+          try {
+            payload = decryptChunk(deriveKey(this.rooms.room.pin), payload)
+          } catch {
+            this.send(ws, { type: 'error', message: 'Could not decrypt chunk. Check the room PIN.' })
+            return
+          }
+        }
+        const entry = this.diskAssembler.addChunk(frame.fileId, frame.index, payload)
+        if (!entry) return
+        this.transfers.setReceived(frame.fileId, entry.received)
+        this.completeDiskTransfer(frame.fileId)
+        return
+      }
       const msg = parseClientMessage(raw.toString())
       if (!msg) return
       this.handleHostClientMessage(ws, msg)
@@ -1002,6 +1167,28 @@ export class ShareServer {
         this.emitStatus()
       }
     })
+  }
+
+  private completeDiskTransfer(fileId: string) {
+    if (!this.diskAssembler.isComplete(fileId)) return
+    const assembled = this.diskAssembler.finalizeInPlace(fileId)
+    if (!assembled) return
+    this.encryptedFileIds.delete(fileId)
+    const item = this.rooms.addFileFromDisk(
+      {
+        id: assembled.meta.fileId,
+        name: assembled.meta.name,
+        size: assembled.meta.size,
+        mimeType: assembled.meta.mimeType,
+        from: assembled.meta.from,
+        fromName: assembled.meta.fromName,
+      },
+      assembled.path,
+    )
+    this.transfers.complete(item.id, item.size)
+    this.broadcast({ type: 'item', item })
+    this.cb.onItems(this.rooms.items)
+    this.cb.onNotification('File received', `${item.name} from ${item.fromName}`)
   }
 
   private handleHostClientMessage(ws: WebSocket, msg: ReturnType<typeof parseClientMessage>) {
@@ -1076,52 +1263,41 @@ export class ShareServer {
         })
         return
       }
-      this.assembler.start({
+      const entry = this.diskAssembler.start({
         fileId: msg.fileId,
         name: msg.name,
         size: msg.size,
         mimeType: msg.mimeType,
         totalChunks: msg.totalChunks,
+        chunkSize: msg.chunkSize,
         from: state.peerId,
         fromName: state.name,
+        resume: msg.resume,
       })
+      if (msg.encrypted) this.encryptedFileIds.add(msg.fileId)
+      else this.encryptedFileIds.delete(msg.fileId)
       this.transfers.start({
         fileId: msg.fileId,
         name: msg.name,
         total: msg.size,
         direction: 'download',
       })
+      this.send(ws, { type: 'file-status', fileId: msg.fileId, nextIndex: entry.nextIndex })
       return
     }
 
     if (msg.type === 'file-chunk') {
-      const entry = this.assembler.addChunk(msg.fileId, msg.index, msg.data)
+      const entry = this.diskAssembler.addChunkBase64(msg.fileId, msg.index, msg.data)
       if (!entry) return
       this.transfers.setReceived(entry.fileId, entry.received)
-      if (this.assembler.isComplete(msg.fileId)) {
-        const assembled = this.assembler.assemble(msg.fileId)
-        if (!assembled) return
-        const item = this.rooms.addFileMeta(
-          {
-            id: assembled.meta.fileId,
-            name: assembled.meta.name,
-            size: assembled.meta.size,
-            mimeType: assembled.meta.mimeType,
-            from: assembled.meta.from,
-            fromName: assembled.meta.fromName,
-          },
-          assembled.buffer,
-        )
-        this.transfers.complete(item.id, item.size)
-        this.broadcast({ type: 'item', item })
-        this.cb.onItems(this.rooms.items)
-        this.cb.onNotification('File received', `${item.name} from ${item.fromName}`)
-      }
+      this.completeDiskTransfer(msg.fileId)
       return
     }
 
     if (msg.type === 'file-cancel') {
       this.assembler.cancel(msg.fileId)
+      this.diskAssembler.cancel(msg.fileId)
+      this.encryptedFileIds.delete(msg.fileId)
       this.transfers.cancel(msg.fileId)
       return
     }
@@ -1132,6 +1308,12 @@ export class ShareServer {
   }
 
   private handleGuestMessage(msg: ServerMessage) {
+    if (msg.type === 'file-status') {
+      const resolve = this.fileStatusWaiters.get(msg.fileId)
+      this.fileStatusWaiters.delete(msg.fileId)
+      resolve?.(msg.nextIndex)
+      return
+    }
     if (msg.type === 'item') {
       if (msg.item.type === 'file') {
         // Guest only gets metadata; download is host-side for v1 relay

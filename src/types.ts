@@ -58,6 +58,17 @@ export type AppSettings = {
   firstRunDone: boolean
   autoRemoteOnCreate: boolean
   maxFileSizeMb: number
+  e2eEncryption: boolean
+  dismissedUpdateVersion?: string
+}
+
+export type UpdateInfo = {
+  updateAvailable: boolean
+  currentVersion: string
+  latestVersion: string | null
+  releaseUrl: string
+  releaseName?: string
+  error?: string
 }
 
 export type FileProgress = {
@@ -150,14 +161,22 @@ declare global {
         mimeType: string
         data: ArrayBuffer
       }) => Promise<void>
+      getPathForFile: (file: File) => string | null
+      sendFilePath: (filePath: string, name?: string, mimeType?: string) => Promise<void>
       getLocalIpHint: () => Promise<string[]>
       dismissFirstRun: () => Promise<void>
+      checkForUpdates: () => Promise<UpdateInfo>
+      openUpdatePage: (url?: string) => Promise<void>
+      dismissUpdate: (version: string) => Promise<AppSettings>
+      getCachedUpdate: () => Promise<UpdateInfo | null>
+      downloadAndInstallUpdate: () => Promise<{ ok: boolean; error?: string }>
       onStatus: (cb: (status: ServerStatus) => void) => () => void
       onItems: (cb: (items: RoomItem[]) => void) => () => void
       onPeers: (cb: (peers: Peer[]) => void) => () => void
       onProgress: (cb: (p: FileProgress) => void) => () => void
       onNotification: (cb: (payload: { title: string; body: string }) => void) => () => void
       onNavigate: (cb: (page: string) => void) => () => void
+      onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
     }
   }
 }

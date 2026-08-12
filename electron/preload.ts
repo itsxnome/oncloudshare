@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppSettings,
   ServerStatus,
@@ -66,8 +66,26 @@ contextBridge.exposeInMainWorld('oncloud', {
     mimeType: string
     data: ArrayBuffer
   }): Promise<void> => ipcRenderer.invoke('files:sendBuffer', payload),
+  getPathForFile: (file: File): string | null => {
+    try {
+      return webUtils.getPathForFile(file) || null
+    } catch {
+      return null
+    }
+  },
+  sendFilePath: (filePath: string, name?: string, mimeType?: string): Promise<void> =>
+    ipcRenderer.invoke('files:sendPath', filePath, name, mimeType),
   getLocalIpHint: (): Promise<string[]> => ipcRenderer.invoke('net:localIps'),
   dismissFirstRun: (): Promise<void> => ipcRenderer.invoke('app:dismissFirstRun'),
+  checkForUpdates: (): Promise<import('./shared/types').UpdateInfo> =>
+    ipcRenderer.invoke('updates:check'),
+  openUpdatePage: (url?: string): Promise<void> => ipcRenderer.invoke('updates:open', url),
+  dismissUpdate: (version: string): Promise<import('./shared/types').AppSettings> =>
+    ipcRenderer.invoke('updates:dismiss', version),
+  getCachedUpdate: (): Promise<import('./shared/types').UpdateInfo | null> =>
+    ipcRenderer.invoke('updates:getCached'),
+  downloadAndInstallUpdate: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('updates:downloadAndInstall'),
   onStatus: (cb: (status: ServerStatus) => void) => subscribe('status', cb),
   onItems: (cb: (items: RoomItem[]) => void) => subscribe('items', cb),
   onPeers: (cb: (peers: Peer[]) => void) => subscribe('peers', cb),
@@ -75,4 +93,6 @@ contextBridge.exposeInMainWorld('oncloud', {
   onNotification: (cb: (payload: { title: string; body: string }) => void) =>
     subscribe('notification', cb),
   onNavigate: (cb: (page: string) => void) => subscribe('navigate', cb),
+  onUpdateAvailable: (cb: (info: import('./shared/types').UpdateInfo) => void) =>
+    subscribe('update-available', cb),
 })

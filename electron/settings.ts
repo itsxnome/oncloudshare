@@ -15,7 +15,9 @@ const defaults: AppSettings = {
   cloudflaredPath: '',
   firstRunDone: false,
   autoRemoteOnCreate: true,
-  maxFileSizeMb: 2048,
+  maxFileSizeMb: 0,
+  e2eEncryption: false,
+  dismissedUpdateVersion: '',
 }
 
 export function createSettingsStore() {

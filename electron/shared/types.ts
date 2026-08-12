@@ -58,6 +58,18 @@ export type AppSettings = {
   firstRunDone: boolean
   autoRemoteOnCreate: boolean
   maxFileSizeMb: number
+  e2eEncryption: boolean
+  /** Last update tag the user dismissed ("Later") */
+  dismissedUpdateVersion?: string
+}
+
+export type UpdateInfo = {
+  updateAvailable: boolean
+  currentVersion: string
+  latestVersion: string | null
+  releaseUrl: string
+  releaseName?: string
+  error?: string
 }
 
 export type FileProgress = {

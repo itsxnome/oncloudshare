@@ -1,16 +1,19 @@
 import path from 'path'
 import fs from 'fs'
 
-export function resolveMobileIndex(): string | null {
-  const candidates = [
-    path.join(process.resourcesPath || '', 'resources', 'mobile', 'index.html'),
-    path.join(process.resourcesPath || '', 'mobile', 'index.html'),
-    path.join(process.cwd(), 'resources', 'mobile', 'index.html'),
-    path.join(__dirname, 'mobile', 'index.html'),
-    path.join(__dirname, '..', '..', 'resources', 'mobile', 'index.html'),
-    path.join(__dirname, '..', '..', 'electron', 'server', 'mobile', 'index.html'),
+function mobileCandidates(fileName: string): string[] {
+  return [
+    path.join(process.resourcesPath || '', 'resources', 'mobile', fileName),
+    path.join(process.resourcesPath || '', 'mobile', fileName),
+    path.join(process.cwd(), 'resources', 'mobile', fileName),
+    path.join(__dirname, 'mobile', fileName),
+    path.join(__dirname, '..', '..', 'resources', 'mobile', fileName),
+    path.join(__dirname, '..', '..', 'electron', 'server', 'mobile', fileName),
   ]
-  for (const c of candidates) {
+}
+
+export function resolveMobileFile(fileName: string): string | null {
+  for (const c of mobileCandidates(fileName)) {
     try {
       if (c && fs.existsSync(c)) return c
     } catch {
@@ -18,4 +21,8 @@ export function resolveMobileIndex(): string | null {
     }
   }
   return null
+}
+
+export function resolveMobileIndex(): string | null {
+  return resolveMobileFile('index.html')
 }

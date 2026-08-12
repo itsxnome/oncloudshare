@@ -377,6 +377,25 @@
       .paste-actions .btn {
         flex: 1;
       }
+      .stay {
+        margin-bottom: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(59, 130, 246, 0.35);
+        background: rgba(59, 130, 246, 0.12);
+        color: var(--text);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .stay.warn {
+        border-color: rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.12);
+      }
+      .stay strong {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 13px;
+      }
     </style>
   </head>
   <body>
@@ -407,6 +426,10 @@
       </section>
 
       <section id="roomView" class="hidden">
+        <div id="stayBanner" class="stay">
+          <strong>Keep this page open while sending</strong>
+          Phone browsers pause the connection when you switch apps. If that happens, return here — we’ll reconnect and finish the queue automatically.
+        </div>
         <div class="card">
           <div class="label">Room</div>
           <div id="roomName"></div>
@@ -475,9 +498,38 @@
         items: [],
         reconnectTimer: null,
         intentionalLeave: false,
+        queue: [],
+        sending: false,
+        wakeLock: null,
+        pingTimer: null,
+        connectPromise: null,
+        fileStatuses: new Map(),
       }
 
       const $ = (id) => document.getElementById(id)
+
+      function setStayBanner(mode) {
+        const el = $('stayBanner')
+        if (!el) return
+        el.classList.toggle('warn', mode === 'paused' || mode === 'offline')
+        if (mode === 'paused') {
+          el.innerHTML =
+            '<strong>Transfer paused — you left the page</strong>Come back to this tab. We’ll reconnect and resume remaining files.'
+        } else if (mode === 'offline') {
+          el.innerHTML =
+            '<strong>Disconnected</strong>Reconnecting… stay on this page. Remaining uploads are queued (' +
+            state.queue.length +
+            ').'
+        } else if (mode === 'queue') {
+          el.innerHTML =
+            '<strong>Uploading — keep this page open</strong>' +
+            state.queue.length +
+            ' file(s) in queue. Switching apps will pause until you return.'
+        } else {
+          el.innerHTML =
+            '<strong>Keep this page open while sending</strong>Phone browsers pause the connection when you switch apps. If that happens, return here — we’ll reconnect and finish the queue automatically.'
+        }
+      }
 
       function showError(msg) {
         const el = $('error')
@@ -593,21 +645,6 @@
         return '/files/' + encodeURIComponent(id) + '?' + params.toString()
       }
 
-      function showRoom() {
-        $('joinView').classList.add('hidden')
-        $('roomView').classList.remove('hidden')
-        $('composer').classList.remove('hidden')
-        $('roomName').textContent = state.room.name
-        $('roomCode').textContent = state.room.code
-        renderFeed()
-      }
-
-      function showJoin() {
-        $('joinView').classList.remove('hidden')
-        $('roomView').classList.add('hidden')
-        $('composer').classList.add('hidden')
-      }
-
       async function loadRoomInfo() {
         try {
           const res = await fetch('/room')
@@ -627,8 +664,119 @@
         }
       }
 
+      function showRoom() {
+        $('joinView').classList.add('hidden')
+        $('roomView').classList.remove('hidden')
+        $('composer').classList.remove('hidden')
+        $('roomName').textContent = state.room.name
+        $('roomCode').textContent = state.room.code
+        setStayBanner(state.queue.length ? 'queue' : 'default')
+        renderFeed()
+        startPing()
+        saveSession()
+      }
+
+      function showJoin() {
+        $('joinView').classList.remove('hidden')
+        $('roomView').classList.add('hidden')
+        $('composer').classList.add('hidden')
+        stopPing()
+        clearSession()
+      }
+
+      function saveSession() {
+        try {
+          sessionStorage.setItem(
+            'ocs-session',
+            JSON.stringify({
+              peerId: state.peerId,
+              name: $('name').value.trim() || 'Phone',
+              code: $('code').value.trim().toUpperCase(),
+              pin: $('pin').value.trim(),
+            }),
+          )
+        } catch {}
+      }
+
+      function clearSession() {
+        try {
+          sessionStorage.removeItem('ocs-session')
+        } catch {}
+      }
+
+      function loadSession() {
+        try {
+          const raw = sessionStorage.getItem('ocs-session')
+          if (!raw) return null
+          return JSON.parse(raw)
+        } catch {
+          return null
+        }
+      }
+
+      async function requestWakeLock() {
+        try {
+          if (!('wakeLock' in navigator)) return
+          if (state.wakeLock) return
+          state.wakeLock = await navigator.wakeLock.request('screen')
+          state.wakeLock.addEventListener('release', () => {
+            state.wakeLock = null
+          })
+        } catch {
+          state.wakeLock = null
+        }
+      }
+
+      async function releaseWakeLock() {
+        try {
+          if (state.wakeLock) await state.wakeLock.release()
+        } catch {}
+        state.wakeLock = null
+      }
+
+      function startPing() {
+        stopPing()
+        state.pingTimer = setInterval(() => {
+          try {
+            if (state.ws && state.ws.readyState === 1) {
+              state.ws.send(JSON.stringify({ type: 'ping' }))
+            }
+          } catch {}
+        }, 12000)
+      }
+
+      function stopPing() {
+        if (state.pingTimer) clearInterval(state.pingTimer)
+        state.pingTimer = null
+      }
+
+      function isSocketOpen() {
+        return Boolean(state.ws && state.ws.readyState === 1 && state.room)
+      }
+
+      async function ensureConnected() {
+        if (state.intentionalLeave) return false
+        if (isSocketOpen()) return true
+        if (state.connectPromise) {
+          try {
+            await state.connectPromise
+            return isSocketOpen()
+          } catch {
+            return false
+          }
+        }
+        try {
+          await connect()
+          return isSocketOpen()
+        } catch {
+          return false
+        }
+      }
+
       function connect() {
-        return new Promise((resolve, reject) => {
+        if (state.connectPromise) return state.connectPromise
+        state.connectPromise = new Promise((resolve, reject) => {
+          clearTimeout(state.reconnectTimer)
           const ws = new WebSocket(wsUrl())
           state.ws = ws
           let settled = false
@@ -636,11 +784,13 @@
           const fail = (msg) => {
             if (settled) return
             settled = true
+            state.connectPromise = null
             reject(new Error(msg))
           }
 
           ws.onopen = () => {
-            state.peerId = state.peerId || Math.random().toString(16).slice(2) + Date.now().toString(16)
+            state.peerId =
+              state.peerId || Math.random().toString(16).slice(2) + Date.now().toString(16)
             ws.send(
               JSON.stringify({
                 type: 'join',
@@ -670,7 +820,9 @@
               state.items = msg.items || []
               setStatus('Connected · ' + (msg.peers || []).length + ' online', true)
               showRoom()
+              state.connectPromise = null
               resolve(msg)
+              void processQueue()
               return
             }
             if (msg.type === 'item') {
@@ -687,6 +839,13 @@
               setStatus('Connected · ' + (msg.peers || []).length + ' online', true)
               return
             }
+            if (msg.type === 'pong') return
+            if (msg.type === 'file-status') {
+              const resolveStatus = state.fileStatuses.get(msg.fileId)
+              state.fileStatuses.delete(msg.fileId)
+              if (resolveStatus) resolveStatus(msg.nextIndex || 0)
+              return
+            }
             if (msg.type === 'room-closed') {
               state.intentionalLeave = true
               showError('Host closed the room')
@@ -696,18 +855,32 @@
 
           ws.onerror = () => fail('Could not connect')
           ws.onclose = () => {
-            if (!settled) fail('Connection closed')
-            else if (!state.intentionalLeave) {
-              setStatus('Disconnected — retrying…', false)
-              clearTimeout(state.reconnectTimer)
-              state.reconnectTimer = setTimeout(() => {
-                connect().catch(() => setStatus('Disconnected', false))
-              }, 2000)
-            } else {
-              setStatus('Disconnected', false)
+            state.connectPromise = null
+            stopPing()
+            if (!settled) {
+              fail('Connection closed')
+              return
             }
+            if (state.intentionalLeave) {
+              setStatus('Disconnected', false)
+              return
+            }
+            setStatus('Disconnected — retrying…', false)
+            setStayBanner(state.queue.length ? 'offline' : 'paused')
+            clearTimeout(state.reconnectTimer)
+            const delay = document.visibilityState === 'hidden' ? 1500 : 800
+            state.reconnectTimer = setTimeout(() => {
+              if (state.intentionalLeave) return
+              if (document.visibilityState === 'hidden') {
+                // Wait until user returns; visibility handler will reconnect
+                setStatus('Paused in background', false)
+                return
+              }
+              connect().catch(() => setStatus('Disconnected', false))
+            }, delay)
           }
         })
+        return state.connectPromise
       }
 
       async function join() {
@@ -727,6 +900,9 @@
       function leave(sendLeave) {
         state.intentionalLeave = true
         clearTimeout(state.reconnectTimer)
+        state.queue = []
+        stopPing()
+        void releaseWakeLock()
         try {
           if (sendLeave !== false && state.ws && state.ws.readyState === 1) {
             state.ws.send(JSON.stringify({ type: 'leave' }))
@@ -736,16 +912,61 @@
         state.ws = null
         state.room = null
         state.items = []
+        state.connectPromise = null
         showJoin()
         setStatus('Left room', false)
         loadRoomInfo()
       }
 
+      async function onPageResumed() {
+        if (state.intentionalLeave || !loadSession()) return
+        if (!state.room && !loadSession()) return
+        // Restore join fields from session if needed
+        const session = loadSession()
+        if (session) {
+          if (session.name) $('name').value = session.name
+          if (session.code) $('code').value = session.code
+          if (session.pin != null) $('pin').value = session.pin
+          if (session.peerId) state.peerId = session.peerId
+        }
+        if (!state.room && !session) return
+        setStayBanner(state.queue.length ? 'offline' : 'default')
+        setStatus('Reconnecting…', false)
+        const ok = await ensureConnected()
+        if (ok) {
+          showToast(state.queue.length ? 'Reconnected — resuming uploads' : 'Reconnected')
+          void processQueue()
+          void requestWakeLock()
+        } else {
+          setStayBanner('offline')
+        }
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          void onPageResumed()
+        } else if (state.room && !state.intentionalLeave) {
+          setStayBanner(state.queue.length ? 'paused' : 'default')
+          setStatus('In background — return to stay connected', false)
+        }
+      })
+      window.addEventListener('pageshow', () => void onPageResumed())
+      window.addEventListener('focus', () => void onPageResumed())
+      window.addEventListener('online', () => void onPageResumed())
+      document.addEventListener('resume', () => void onPageResumed()) // some WebViews
+
       function sendText() {
         const text = $('text').value.trim()
-        if (!text || !state.ws || state.ws.readyState !== 1) return
-        state.ws.send(JSON.stringify({ type: 'text', text }))
-        $('text').value = ''
+        if (!text) return
+        void (async () => {
+          const ok = await ensureConnected()
+          if (!ok || !state.ws || state.ws.readyState !== 1) {
+            showError('Not connected — return to this page and try again')
+            return
+          }
+          state.ws.send(JSON.stringify({ type: 'text', text }))
+          $('text').value = ''
+        })()
       }
 
       function sendTextValue(text) {
@@ -943,14 +1164,15 @@
         }
       }
 
-      function arrayBufferToBase64(buffer) {
-        const bytes = new Uint8Array(buffer)
-        let binary = ''
-        const step = 0x8000
-        for (let i = 0; i < bytes.length; i += step) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step))
-        }
-        return btoa(binary)
+      function encodeChunkFrame(fileId, index, payload) {
+        const id = new TextEncoder().encode(fileId)
+        if (id.length > 255) throw new Error('File identifier is too long')
+        const frame = new Uint8Array(12 + id.length + payload.byteLength)
+        frame.set([79, 67, 83, 70, 1, 1, id.length, 0], 0)
+        frame.set(id, 8)
+        new DataView(frame.buffer).setUint32(8 + id.length, index, false)
+        frame.set(new Uint8Array(payload), 12 + id.length)
+        return frame.buffer
       }
 
       function guessName(file, mime, stamp) {
@@ -974,34 +1196,48 @@
         return 'ios-' + stamp + '.' + ext
       }
 
-      async function sendFileViaSocket(buffer, name, mime) {
+      async function sendFileViaSocket(job) {
+        const { file, name, mime } = job
         if (!state.ws || state.ws.readyState !== 1) {
           throw new Error('Not connected')
         }
-        const CHUNK = 64 * 1024
-        const totalChunks = Math.ceil(buffer.byteLength / CHUNK) || 1
+        const CHUNK = 512 * 1024
+        const totalChunks = Math.ceil(file.size / CHUNK) || 1
         const fileId =
-          Math.random().toString(16).slice(2) + Date.now().toString(16)
+          job.fileId || (job.fileId = Math.random().toString(16).slice(2) + Date.now().toString(16))
+        const nextIndexPromise = new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            state.fileStatuses.delete(fileId)
+            resolve(0)
+          }, 3000)
+          state.fileStatuses.set(fileId, (index) => {
+            clearTimeout(timer)
+            resolve(index)
+          })
+        })
         state.ws.send(
           JSON.stringify({
             type: 'file-meta',
             fileId,
             name,
-            size: buffer.byteLength,
+            size: file.size,
             mimeType: mime,
             totalChunks,
+            chunkSize: CHUNK,
+            binary: true,
+            resume: true,
           }),
         )
-        for (let i = 0; i < totalChunks; i++) {
-          const slice = buffer.slice(i * CHUNK, (i + 1) * CHUNK)
-          state.ws.send(
-            JSON.stringify({
-              type: 'file-chunk',
-              fileId,
-              index: i,
-              data: arrayBufferToBase64(slice),
-            }),
-          )
+        const nextIndex = await nextIndexPromise
+        for (let i = nextIndex; i < totalChunks; i++) {
+          if (document.visibilityState === 'hidden') {
+            throw new Error('BACKGROUND_PAUSE')
+          }
+          if (!state.ws || state.ws.readyState !== 1) {
+            throw new Error('Not connected')
+          }
+          const slice = await file.slice(i * CHUNK, (i + 1) * CHUNK).arrayBuffer()
+          state.ws.send(encodeChunkFrame(fileId, i, slice))
           $('uploadBar').style.width =
             Math.max(5, Math.round(((i + 1) / totalChunks) * 100)) + '%'
           $('uploadLabel').textContent =
@@ -1010,16 +1246,15 @@
         }
       }
 
-      async function sendFileViaHttp(buffer, name, mime) {
-        const solid = new File([buffer], name, { type: mime })
+      async function sendFileViaHttp(file, name, mime) {
+        if (!state.room) throw new Error('Not connected')
         const form = new FormData()
-        form.append('file', solid, name)
+        form.append('file', file, name)
         form.append('code', state.room.code)
         form.append('pin', $('pin').value.trim())
         form.append('fromName', $('name').value.trim() || 'Phone')
         form.append('peerId', state.peerId || '')
 
-        // XHR is more reliable than fetch for multipart on some iOS builds
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest()
           xhr.open('POST', '/upload')
@@ -1035,7 +1270,7 @@
             } catch {}
             if (/unexpected end of form/i.test(msg)) {
               msg =
-                'Upload was cut off (common on iOS). Stay on the page and try Attach, or a smaller file.'
+                'Upload was cut off. Stay on this page and try again, or use a smaller file.'
             }
             reject(new Error(msg))
           }
@@ -1049,65 +1284,90 @@
         })
       }
 
+      async function processQueue() {
+        if (state.sending) return
+        if (!state.queue.length) {
+          $('uploadProgress').classList.add('hidden')
+          setStayBanner('default')
+          void releaseWakeLock()
+          return
+        }
+        if (document.visibilityState === 'hidden') {
+          setStayBanner('paused')
+          return
+        }
+        state.sending = true
+        $('uploadProgress').classList.remove('hidden')
+        setStayBanner('queue')
+        await requestWakeLock()
+        try {
+          while (state.queue.length) {
+            if (document.visibilityState === 'hidden') {
+              setStayBanner('paused')
+              break
+            }
+            const ok = await ensureConnected()
+            if (!ok) {
+              setStayBanner('offline')
+              break
+            }
+            const job = state.queue[0]
+            $('uploadLabel').textContent = 'Uploading ' + job.name + '…'
+            $('uploadBar').style.width = '5%'
+            try {
+              await sendFileViaSocket(job)
+              state.queue.shift()
+              showToast('Sent ' + job.name)
+            } catch (e) {
+              const msg = (e && e.message) || 'Upload failed'
+              if (msg === 'BACKGROUND_PAUSE' || msg === 'Not connected') {
+                setStayBanner(msg === 'BACKGROUND_PAUSE' ? 'paused' : 'offline')
+                break
+              }
+              try {
+                await sendFileViaHttp(job.file, job.name, job.mime)
+                state.queue.shift()
+                showToast('Sent ' + job.name)
+              } catch (e2) {
+                showError((e2 && e2.message) || msg)
+                state.queue.shift()
+              }
+            }
+          }
+        } finally {
+          state.sending = false
+          if (!state.queue.length) {
+            $('uploadProgress').classList.add('hidden')
+            $('uploadBar').style.width = '0%'
+            setStayBanner('default')
+            void releaseWakeLock()
+          } else {
+            $('uploadLabel').textContent =
+              state.queue.length + ' file(s) waiting — return to this page to finish'
+          }
+        }
+      }
+
       async function sendFile(file) {
         if (!file || !state.room) return
-        const max = 2048 * 1024 * 1024
         const stamp = pasteStamp()
         const mime = file.type || 'application/octet-stream'
         const name = guessName(file, mime, stamp)
 
         showError('')
         $('uploadProgress').classList.remove('hidden')
-        $('uploadLabel').textContent = 'Reading ' + name + '…'
+        $('uploadLabel').textContent = 'Queuing ' + name + '…'
         $('uploadBar').style.width = '3%'
 
-        let buffer
-        try {
-          // Fully buffer first — iOS drag-drop File streams often truncate mid-upload
-          buffer = await file.arrayBuffer()
-        } catch (e) {
-          showError('Could not read the dropped file. Use Attach instead.')
-          $('uploadProgress').classList.add('hidden')
-          return
-        }
-
-        if (!buffer || !buffer.byteLength) {
+        if (!file.size) {
           showError('That drop had no file data. On iPhone use Attach.')
-          $('uploadProgress').classList.add('hidden')
-          return
-        }
-        if (buffer.byteLength > max) {
-          showError('File is too large for this room')
-          $('uploadProgress').classList.add('hidden')
+          if (!state.queue.length) $('uploadProgress').classList.add('hidden')
           return
         }
 
-        $('uploadLabel').textContent = 'Uploading ' + name + '…'
-        $('uploadBar').style.width = '5%'
-        try {
-          // Prefer WebSocket chunks (same as PC) — avoids iOS multipart "Unexpected end of form"
-          if (state.ws && state.ws.readyState === 1) {
-            await sendFileViaSocket(buffer, name, mime)
-          } else {
-            await sendFileViaHttp(buffer, name, mime)
-          }
-          $('uploadBar').style.width = '100%'
-          showToast('File sent')
-        } catch (e) {
-          const msg = (e && e.message) || 'Upload failed'
-          if (/unexpected end of form/i.test(msg)) {
-            showError(
-              'Upload was cut off. Try Attach (not drag & drop), keep Safari open, or use a smaller file.',
-            )
-          } else {
-            showError(msg)
-          }
-        } finally {
-          setTimeout(() => {
-            $('uploadProgress').classList.add('hidden')
-            $('uploadBar').style.width = '0%'
-          }, 600)
-        }
+        state.queue.push({ name, mime, file })
+        setStayBanner('queue')
+        await processQueue()
       }
 
       async function filesFromDataTransfer(dt) {
@@ -1226,11 +1486,36 @@
 
       const savedName = localStorage.getItem('ocs-name')
       $('name').value = savedName || 'Phone'
+      if (navigator.maxTouchPoints > 0) {
+        $('pickZone').querySelector('strong').textContent = 'Use Attach to choose files'
+        $('pickZone').querySelector('span').textContent =
+          'Attach is most reliable for photos, videos, and documents on phones'
+      }
       $('name').addEventListener('change', () => {
         localStorage.setItem('ocs-name', $('name').value.trim() || 'Phone')
       })
 
+      const session = loadSession()
+      if (session) {
+        if (session.name) $('name').value = session.name
+        if (session.code) $('code').value = session.code
+        if (session.pin != null) $('pin').value = session.pin
+        if (session.peerId) state.peerId = session.peerId
+      }
+
       loadRoomInfo()
+
+      // Auto-rejoin if the tab was restored after being backgrounded/killed lightly
+      if (session && session.code) {
+        state.intentionalLeave = false
+        setTimeout(() => {
+          void connect().catch(() => {})
+        }, 400)
+      }
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {})
+      }
     </script>
   </body>
 </html>
