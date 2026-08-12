@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <title>OnCloudShare</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0b;
+        --surface: #141416;
+        --surface2: #1a1a1e;
+        --border: #2a2a2e;
+        --text: #e4e4e7;
+        --muted: #71717a;
+        --accent: #3b82f6;
+        --online: #22c55e;
+        --danger: #ef4444;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        max-width: 520px;
+        margin: 0 auto;
+      }
+      header {
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+        overflow-wrap: anywhere;
+      }
+      header p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        margin-top: 10px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      #statusText {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .dot.on {
+        background: var(--online);
+      }
+      main {
+        flex: 1;
+        overflow: auto;
+        padding: 14px;
+        padding-bottom: 120px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      .label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 12px;
+        outline: none;
+      }
+      input:focus,
+      textarea:focus {
+        border-color: rgba(59, 130, 246, 0.7);
+      }
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+      .field {
+        margin-bottom: 12px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-secondary {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--accent);
+        width: auto;
+        padding: 8px 0;
+      }
+      .btn:disabled {
+        opacity: 0.45;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+      .row .btn {
+        width: auto;
+        flex: 1;
+      }
+      .code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.12em;
+        font-size: clamp(14px, 5vw, 22px);
+        color: var(--accent);
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      #roomName {
+        font-weight: 600;
+        margin-bottom: 4px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .item {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+        overflow: hidden;
+        min-width: 0;
+      }
+      .meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 8px;
+        min-width: 0;
+      }
+      .meta .from {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .meta .when {
+        flex-shrink: 0;
+      }
+      .fname {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .text {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      .composer {
+        position: sticky;
+        bottom: 0;
+        border-top: 1px solid var(--border);
+        background: rgba(20, 20, 22, 0.96);
+        backdrop-filter: blur(10px);
+        padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+      }
+      .error {
+        background: rgba(127, 29, 29, 0.45);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        color: #fecaca;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .progress {
+        height: 6px;
+        background: var(--border);
+        border-radius: 999px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      .progress > span {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        width: 0%;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .pick {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+        min-height: 88px;
+        border: 1.5px dashed var(--border);
+        border-radius: 14px;
+        background: var(--surface2);
+        color: var(--text);
+        padding: 14px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .pick strong {
+        font-size: 15px;
+      }
+      .pick span {
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+      .pick strong {
+        overflow-wrap: anywhere;
+      }
+      #uploadLabel {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .pick:active,
+      .pick.drag {
+        border-color: var(--accent);
+        background: rgba(59, 130, 246, 0.12);
+      }
+      #fileInput {
+        display: none;
+      }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: calc(130px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 40;
+        max-width: min(420px, calc(100% - 24px));
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: rgba(30, 30, 34, 0.96);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.4;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+        pointer-events: none;
+      }
+      .paste-sheet {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 16px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+      }
+      .paste-card {
+        width: min(480px, 100%);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+      }
+      .paste-card h2 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+      .paste-card p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .paste-target {
+        min-height: 110px;
+        border: 1.5px dashed var(--border);
+        border-radius: 12px;
+        background: var(--bg);
+        padding: 14px;
+        color: var(--text);
+        font-size: 15px;
+        outline: none;
+        overflow-wrap: anywhere;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .paste-target:empty:before {
+        content: attr(data-placeholder);
+        color: var(--muted);
+      }
+      .paste-target:focus {
+        border-color: rgba(59, 130, 246, 0.75);
+      }
+      .paste-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .paste-actions .btn {
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>OnCloudShare</h1>
+      <p>Join from your phone — no app install</p>
+      <div class="badge"><span class="dot" id="dot"></span><span id="statusText">Checking…</span></div>
+    </header>
+
+    <main>
+      <div id="error" class="error hidden"></div>
+
+      <section id="joinView" class="card">
+        <div class="field">
+          <label class="label">Your name</label>
+          <input id="name" placeholder="Phone" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label class="label">Room code</label>
+          <input id="code" class="code" placeholder="ABC123" autocomplete="off" style="letter-spacing: 0.18em; text-transform: uppercase" />
+        </div>
+        <div class="field">
+          <label class="label">PIN (if required)</label>
+          <input id="pin" placeholder="Optional" inputmode="numeric" />
+        </div>
+        <p class="hint" id="roomHint">Open this page from the PC’s share link or the same Wi‑Fi.</p>
+        <button class="btn btn-primary" id="joinBtn">Join room</button>
+      </section>
+
+      <section id="roomView" class="hidden">
+        <div class="card">
+          <div class="label">Room</div>
+          <div id="roomName"></div>
+          <div class="code" id="roomCode"></div>
+        </div>
+        <div
+          class="pick"
+          id="pickZone"
+          role="button"
+          tabindex="0"
+          aria-label="Tap to attach or drop files here"
+        >
+          <strong>Tap, drop, or paste files here</strong>
+          <span>Photos, videos, docs — or use Paste for clipboard text / screenshots</span>
+        </div>
+        <div id="feed"></div>
+      </section>
+    </main>
+
+    <div id="composer" class="composer hidden">
+      <div class="field" style="margin-bottom: 8px">
+        <textarea id="text" placeholder="Type or long-press → Paste text here…"></textarea>
+      </div>
+      <div class="row">
+        <button class="btn btn-secondary" id="pasteBtn" type="button">Paste</button>
+        <button class="btn btn-secondary" id="fileBtn" type="button">Attach</button>
+        <button class="btn btn-primary" id="sendBtn" type="button">Send</button>
+      </div>
+      <div id="uploadProgress" class="hidden">
+        <div class="hint" id="uploadLabel" style="margin-top: 8px">Uploading…</div>
+        <div class="progress"><span id="uploadBar"></span></div>
+      </div>
+      <input id="fileInput" type="file" multiple accept="*/*" />
+      <button class="btn btn-ghost" id="leaveBtn" type="button" style="margin-top: 4px">Leave room</button>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <div id="pasteSheet" class="paste-sheet hidden" aria-hidden="true">
+      <div class="paste-card">
+        <h2>Paste clipboard</h2>
+        <p id="pasteHint">
+          On iPhone, tap <b>Paste</b> on the bar that appears, or long-press the box and choose Paste.
+          Images and text both work.
+        </p>
+        <div
+          id="pasteTarget"
+          class="paste-target"
+          contenteditable="true"
+          role="textbox"
+          inputmode="text"
+          data-placeholder="Long-press here → Paste"
+        ></div>
+        <div class="paste-actions">
+          <button type="button" class="btn btn-secondary" id="pasteCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="pasteRetry">Try again</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        ws: null,
+        peerId: null,
+        room: null,
+        items: [],
+        reconnectTimer: null,
+        intentionalLeave: false,
+      }
+
+      const $ = (id) => document.getElementById(id)
+
+      function showError(msg) {
+        const el = $('error')
+        if (!msg) {
+          el.classList.add('hidden')
+          el.textContent = ''
+          return
+        }
+        el.textContent = msg
+        el.classList.remove('hidden')
+        showToast(msg)
+      }
+
+      let toastTimer = null
+      function showToast(msg) {
+        const el = $('toast')
+        el.textContent = msg
+        el.classList.remove('hidden')
+        clearTimeout(toastTimer)
+        toastTimer = setTimeout(() => el.classList.add('hidden'), 3200)
+      }
+
+      function setStatus(text, on) {
+        $('statusText').textContent = text
+        $('dot').classList.toggle('on', Boolean(on))
+      }
+
+      function wsUrl() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+        return proto + '//' + location.host + '/ws'
+      }
+
+      function formatBytes(n) {
+        if (n < 1024) return n + ' B'
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+        return (n / (1024 * 1024)).toFixed(1) + ' MB'
+      }
+
+      function time(ts) {
+        try {
+          return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        } catch {
+          return ''
+        }
+      }
+
+      function renderFeed() {
+        const feed = $('feed')
+        if (!state.items.length) {
+          feed.innerHTML =
+            '<div class="card hint">Room is empty. Send text or a file to share with the PC.</div>'
+          return
+        }
+        feed.innerHTML = state.items
+          .slice()
+          .reverse()
+          .map((item) => {
+            if (item.type === 'text') {
+              return (
+                '<article class="item"><div class="meta"><span class="from">' +
+                escapeHtml(item.fromName) +
+                '</span><span class="when">' +
+                time(item.createdAt) +
+                '</span></div><div class="text">' +
+                escapeHtml(item.text) +
+                '</div><button class="btn btn-ghost" data-copy="' +
+                encodeURIComponent(item.text) +
+                '">Copy</button></article>'
+              )
+            }
+            return (
+              '<article class="item"><div class="meta"><span class="from">' +
+              escapeHtml(item.fromName) +
+              '</span><span class="when">' +
+              time(item.createdAt) +
+              '</span></div><div class="fname">' +
+              escapeHtml(item.name) +
+              '</div><div class="hint">' +
+              formatBytes(item.size) +
+              '</div><a class="btn btn-secondary" style="margin-top:10px;text-decoration:none" href="' +
+              fileUrl(item.id) +
+              '">Download</a></article>'
+            )
+          })
+          .join('')
+
+        feed.querySelectorAll('[data-copy]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const text = decodeURIComponent(btn.getAttribute('data-copy') || '')
+            try {
+              await navigator.clipboard.writeText(text)
+              btn.textContent = 'Copied'
+              setTimeout(() => (btn.textContent = 'Copy'), 1200)
+            } catch {
+              showError('Could not copy')
+            }
+          })
+        })
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+      }
+
+      function fileUrl(id) {
+        const params = new URLSearchParams({ code: state.room.code })
+        const pin = $('pin').value.trim()
+        if (pin) params.set('pin', pin)
+        return '/files/' + encodeURIComponent(id) + '?' + params.toString()
+      }
+
+      function showRoom() {
+        $('joinView').classList.add('hidden')
+        $('roomView').classList.remove('hidden')
+        $('composer').classList.remove('hidden')
+        $('roomName').textContent = state.room.name
+        $('roomCode').textContent = state.room.code
+        renderFeed()
+      }
+
+      function showJoin() {
+        $('joinView').classList.remove('hidden')
+        $('roomView').classList.add('hidden')
+        $('composer').classList.add('hidden')
+      }
+
+      async function loadRoomInfo() {
+        try {
+          const res = await fetch('/room')
+          if (!res.ok) {
+            setStatus('No active room on this host', false)
+            $('roomHint').textContent =
+              'Ask the PC to create a room, then refresh this page or open the share link again.'
+            return
+          }
+          const info = await res.json()
+          if (info.code) $('code').value = info.code
+          $('roomHint').textContent =
+            'Room “' + info.name + '” on ' + info.hostName + (info.hasPin ? ' · PIN required' : '')
+          setStatus('Ready to join ' + info.code, false)
+        } catch {
+          setStatus('Cannot reach host', false)
+        }
+      }
+
+      function connect() {
+        return new Promise((resolve, reject) => {
+          const ws = new WebSocket(wsUrl())
+          state.ws = ws
+          let settled = false
+
+          const fail = (msg) => {
+            if (settled) return
+            settled = true
+            reject(new Error(msg))
+          }
+
+          ws.onopen = () => {
+            state.peerId = state.peerId || Math.random().toString(16).slice(2) + Date.now().toString(16)
+            ws.send(
+              JSON.stringify({
+                type: 'join',
+                peerId: state.peerId,
+                name: $('name').value.trim() || 'Phone',
+                code: $('code').value.trim().toUpperCase(),
+                pin: $('pin').value.trim() || undefined,
+              }),
+            )
+          }
+
+          ws.onmessage = (ev) => {
+            let msg
+            try {
+              msg = JSON.parse(ev.data)
+            } catch {
+              return
+            }
+            if (msg.type === 'error') {
+              if (!settled) fail(msg.message)
+              else showError(msg.message || 'Transfer error')
+              return
+            }
+            if (msg.type === 'welcome') {
+              settled = true
+              state.room = msg.room
+              state.items = msg.items || []
+              setStatus('Connected · ' + (msg.peers || []).length + ' online', true)
+              showRoom()
+              resolve(msg)
+              return
+            }
+            if (msg.type === 'item') {
+              state.items = state.items.filter((i) => i.id !== msg.item.id).concat([msg.item])
+              renderFeed()
+              return
+            }
+            if (msg.type === 'items') {
+              state.items = msg.items || []
+              renderFeed()
+              return
+            }
+            if (msg.type === 'peers') {
+              setStatus('Connected · ' + (msg.peers || []).length + ' online', true)
+              return
+            }
+            if (msg.type === 'room-closed') {
+              state.intentionalLeave = true
+              showError('Host closed the room')
+              leave(false)
+            }
+          }
+
+          ws.onerror = () => fail('Could not connect')
+          ws.onclose = () => {
+            if (!settled) fail('Connection closed')
+            else if (!state.intentionalLeave) {
+              setStatus('Disconnected — retrying…', false)
+              clearTimeout(state.reconnectTimer)
+              state.reconnectTimer = setTimeout(() => {
+                connect().catch(() => setStatus('Disconnected', false))
+              }, 2000)
+            } else {
+              setStatus('Disconnected', false)
+            }
+          }
+        })
+      }
+
+      async function join() {
+        showError('')
+        $('joinBtn').disabled = true
+        state.intentionalLeave = false
+        try {
+          await connect()
+        } catch (e) {
+          showError(e.message || 'Join failed')
+          setStatus('Join failed', false)
+        } finally {
+          $('joinBtn').disabled = false
+        }
+      }
+
+      function leave(sendLeave) {
+        state.intentionalLeave = true
+        clearTimeout(state.reconnectTimer)
+        try {
+          if (sendLeave !== false && state.ws && state.ws.readyState === 1) {
+            state.ws.send(JSON.stringify({ type: 'leave' }))
+          }
+          state.ws && state.ws.close()
+        } catch {}
+        state.ws = null
+        state.room = null
+        state.items = []
+        showJoin()
+        setStatus('Left room', false)
+        loadRoomInfo()
+      }
+
+      function sendText() {
+        const text = $('text').value.trim()
+        if (!text || !state.ws || state.ws.readyState !== 1) return
+        state.ws.send(JSON.stringify({ type: 'text', text }))
+        $('text').value = ''
+      }
+
+      function sendTextValue(text) {
+        const value = String(text || '').trim()
+        if (!value || !state.ws || state.ws.readyState !== 1) return false
+        state.ws.send(JSON.stringify({ type: 'text', text: value }))
+        showToast('Text sent')
+        return true
+      }
+
+      function pasteStamp() {
+        return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      }
+
+      function isIos() {
+        return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      }
+
+      function openPasteSheet() {
+        $('pasteSheet').classList.remove('hidden')
+        $('pasteSheet').setAttribute('aria-hidden', 'false')
+        const target = $('pasteTarget')
+        target.innerHTML = ''
+        setTimeout(() => {
+          target.focus()
+          try {
+            const range = document.createRange()
+            range.selectNodeContents(target)
+            range.collapse(true)
+            const sel = window.getSelection()
+            sel.removeAllRanges()
+            sel.addRange(range)
+          } catch {}
+        }, 50)
+      }
+
+      function closePasteSheet() {
+        $('pasteSheet').classList.add('hidden')
+        $('pasteSheet').setAttribute('aria-hidden', 'true')
+        $('pasteTarget').innerHTML = ''
+      }
+
+      async function ingestClipboardData(clipboardData) {
+        if (!clipboardData) return false
+        const files = []
+        if (clipboardData.files && clipboardData.files.length) {
+          for (const file of Array.from(clipboardData.files)) files.push(file)
+        }
+        if (!files.length && clipboardData.items) {
+          for (const item of Array.from(clipboardData.items)) {
+            if (item.kind === 'file') {
+              const file = item.getAsFile()
+              if (file) files.push(file)
+            }
+          }
+        }
+        if (files.length) {
+          for (const file of files) await sendFile(file)
+          return true
+        }
+        const text = clipboardData.getData && clipboardData.getData('text/plain')
+        if (text && text.trim()) {
+          return sendTextValue(text)
+        }
+        return false
+      }
+
+      async function ingestClipboardItems(items) {
+        if (!items || !items.length) return false
+        for (const item of items) {
+          const imageType = (item.types || []).find((t) => t.startsWith('image/'))
+          if (imageType) {
+            const blob = await item.getType(imageType)
+            const ext = (imageType.split('/')[1] || 'png').replace('+xml', '')
+            const file = new File([blob], 'clipboard-' + pasteStamp() + '.' + ext, {
+              type: imageType,
+            })
+            await sendFile(file)
+            return true
+          }
+        }
+        for (const item of items) {
+          if ((item.types || []).includes('text/plain')) {
+            const blob = await item.getType('text/plain')
+            const text = await blob.text()
+            if (sendTextValue(text)) return true
+          }
+        }
+        return false
+      }
+
+      async function tryAsyncClipboardRead() {
+        if (!navigator.clipboard) return false
+        try {
+          if (typeof navigator.clipboard.read === 'function') {
+            const items = await navigator.clipboard.read()
+            if (await ingestClipboardItems(items)) return true
+          }
+        } catch {
+          /* iOS may reject until user confirms Paste UI */
+        }
+        try {
+          if (typeof navigator.clipboard.readText === 'function') {
+            const text = await navigator.clipboard.readText()
+            if (sendTextValue(text)) return true
+          }
+        } catch {
+          /* ignore */
+        }
+        return false
+      }
+
+      async function pasteClipboard() {
+        if (!state.room) return
+        showError('')
+        openPasteSheet()
+        $('pasteHint').textContent = isIos()
+          ? 'iPhone: tap Paste on the bar that appears (or long-press the box → Paste). Safari blocks silent clipboard reads.'
+          : 'Allow clipboard access if asked, or long-press / Ctrl+V into the box below.'
+
+        // Triggers iOS/Safari Paste confirmation UI while sheet is open.
+        const ok = await tryAsyncClipboardRead()
+        if (ok) {
+          closePasteSheet()
+          return
+        }
+        // Keep sheet open for long-press paste / second try.
+      }
+
+      function handlePasteEvent(e) {
+        if (!state.room) return
+        const inSheet = e.target && e.target.closest && e.target.closest('#pasteSheet')
+        const editing = e.target && e.target.closest && e.target.closest('textarea, input, [contenteditable="true"]')
+
+        const run = async () => {
+          const fromEvent = await ingestClipboardData(e.clipboardData)
+          if (fromEvent) {
+            if (inSheet) closePasteSheet()
+            return
+          }
+          if (inSheet) {
+            // After DOM paste into contenteditable, scrape image/text
+            setTimeout(async () => {
+              const target = $('pasteTarget')
+              const img = target.querySelector('img')
+              if (img && img.src) {
+                try {
+                  const res = await fetch(img.src)
+                  const blob = await res.blob()
+                  const type = blob.type || 'image/png'
+                  const ext = type.split('/')[1] || 'png'
+                  const file = new File([blob], 'clipboard-' + pasteStamp() + '.' + ext, { type })
+                  await sendFile(file)
+                  closePasteSheet()
+                  return
+                } catch {}
+              }
+              const text = (target.innerText || target.textContent || '').trim()
+              if (text) {
+                sendTextValue(text)
+                closePasteSheet()
+              }
+            }, 0)
+          }
+        }
+
+        if (inSheet) {
+          e.preventDefault()
+          void run()
+          return
+        }
+
+        // Images/files always take priority even inside textarea
+        const items = e.clipboardData && e.clipboardData.items
+        let hasFile = false
+        if (items) {
+          for (const item of Array.from(items)) {
+            if (item.kind === 'file') {
+              hasFile = true
+              break
+            }
+          }
+        }
+        if (hasFile || (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length)) {
+          e.preventDefault()
+          void run()
+          return
+        }
+        if (editing && !inSheet) return
+        const text = e.clipboardData && e.clipboardData.getData('text/plain')
+        if (text && text.trim()) {
+          e.preventDefault()
+          sendTextValue(text)
+        }
+      }
+
+      function arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        const step = 0x8000
+        for (let i = 0; i < bytes.length; i += step) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step))
+        }
+        return btoa(binary)
+      }
+
+      function guessName(file, mime, stamp) {
+        let name = (file.name || '').trim()
+        if (name) return name.slice(0, 180)
+        const ext = mime.includes('png')
+          ? 'png'
+          : mime.includes('jpeg') || mime.includes('jpg')
+            ? 'jpg'
+            : mime.includes('heic') || mime.includes('heif')
+              ? 'heic'
+              : mime.includes('webp')
+                ? 'webp'
+                : mime.includes('gif')
+                  ? 'gif'
+                  : mime.includes('pdf')
+                    ? 'pdf'
+                    : mime.includes('mp4')
+                      ? 'mp4'
+                      : 'bin'
+        return 'ios-' + stamp + '.' + ext
+      }
+
+      async function sendFileViaSocket(buffer, name, mime) {
+        if (!state.ws || state.ws.readyState !== 1) {
+          throw new Error('Not connected')
+        }
+        const CHUNK = 64 * 1024
+        const totalChunks = Math.ceil(buffer.byteLength / CHUNK) || 1
+        const fileId =
+          Math.random().toString(16).slice(2) + Date.now().toString(16)
+        state.ws.send(
+          JSON.stringify({
+            type: 'file-meta',
+            fileId,
+            name,
+            size: buffer.byteLength,
+            mimeType: mime,
+            totalChunks,
+          }),
+        )
+        for (let i = 0; i < totalChunks; i++) {
+          const slice = buffer.slice(i * CHUNK, (i + 1) * CHUNK)
+          state.ws.send(
+            JSON.stringify({
+              type: 'file-chunk',
+              fileId,
+              index: i,
+              data: arrayBufferToBase64(slice),
+            }),
+          )
+          $('uploadBar').style.width =
+            Math.max(5, Math.round(((i + 1) / totalChunks) * 100)) + '%'
+          $('uploadLabel').textContent =
+            'Uploading ' + name + '… ' + (i + 1) + '/' + totalChunks
+          if (i % 3 === 0) await new Promise((r) => setTimeout(r, 0))
+        }
+      }
+
+      async function sendFileViaHttp(buffer, name, mime) {
+        const solid = new File([buffer], name, { type: mime })
+        const form = new FormData()
+        form.append('file', solid, name)
+        form.append('code', state.room.code)
+        form.append('pin', $('pin').value.trim())
+        form.append('fromName', $('name').value.trim() || 'Phone')
+        form.append('peerId', state.peerId || '')
+
+        // XHR is more reliable than fetch for multipart on some iOS builds
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('POST', '/upload')
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve()
+              return
+            }
+            let msg = 'Upload failed (' + xhr.status + ')'
+            try {
+              const data = JSON.parse(xhr.responseText)
+              if (data && data.error) msg = data.error
+            } catch {}
+            if (/unexpected end of form/i.test(msg)) {
+              msg =
+                'Upload was cut off (common on iOS). Stay on the page and try Attach, or a smaller file.'
+            }
+            reject(new Error(msg))
+          }
+          xhr.onerror = () => reject(new Error('Network error during upload'))
+          xhr.upload.onprogress = (ev) => {
+            if (!ev.lengthComputable) return
+            const pct = Math.max(5, Math.round((ev.loaded / ev.total) * 100))
+            $('uploadBar').style.width = pct + '%'
+          }
+          xhr.send(form)
+        })
+      }
+
+      async function sendFile(file) {
+        if (!file || !state.room) return
+        const max = 2048 * 1024 * 1024
+        const stamp = pasteStamp()
+        const mime = file.type || 'application/octet-stream'
+        const name = guessName(file, mime, stamp)
+
+        showError('')
+        $('uploadProgress').classList.remove('hidden')
+        $('uploadLabel').textContent = 'Reading ' + name + '…'
+        $('uploadBar').style.width = '3%'
+
+        let buffer
+        try {
+          // Fully buffer first — iOS drag-drop File streams often truncate mid-upload
+          buffer = await file.arrayBuffer()
+        } catch (e) {
+          showError('Could not read the dropped file. Use Attach instead.')
+          $('uploadProgress').classList.add('hidden')
+          return
+        }
+
+        if (!buffer || !buffer.byteLength) {
+          showError('That drop had no file data. On iPhone use Attach.')
+          $('uploadProgress').classList.add('hidden')
+          return
+        }
+        if (buffer.byteLength > max) {
+          showError('File is too large for this room')
+          $('uploadProgress').classList.add('hidden')
+          return
+        }
+
+        $('uploadLabel').textContent = 'Uploading ' + name + '…'
+        $('uploadBar').style.width = '5%'
+        try {
+          // Prefer WebSocket chunks (same as PC) — avoids iOS multipart "Unexpected end of form"
+          if (state.ws && state.ws.readyState === 1) {
+            await sendFileViaSocket(buffer, name, mime)
+          } else {
+            await sendFileViaHttp(buffer, name, mime)
+          }
+          $('uploadBar').style.width = '100%'
+          showToast('File sent')
+        } catch (e) {
+          const msg = (e && e.message) || 'Upload failed'
+          if (/unexpected end of form/i.test(msg)) {
+            showError(
+              'Upload was cut off. Try Attach (not drag & drop), keep Safari open, or use a smaller file.',
+            )
+          } else {
+            showError(msg)
+          }
+        } finally {
+          setTimeout(() => {
+            $('uploadProgress').classList.add('hidden')
+            $('uploadBar').style.width = '0%'
+          }, 600)
+        }
+      }
+
+      async function filesFromDataTransfer(dt) {
+        const out = []
+        const seen = new Set()
+        const push = (f) => {
+          if (!f || seen.has(f)) return
+          seen.add(f)
+          out.push(f)
+        }
+        if (dt && dt.files && dt.files.length) {
+          for (const f of Array.from(dt.files)) push(f)
+        }
+        if (dt && dt.items && dt.items.length) {
+          for (const item of Array.from(dt.items)) {
+            if (item.kind === 'file') {
+              try {
+                const f = item.getAsFile()
+                push(f)
+              } catch {}
+            }
+          }
+        }
+        return out.filter((f) => f && typeof f.size === 'number')
+      }
+
+      function bindDropZone(el) {
+        if (!el) return
+        let dragDepth = 0
+        const onDragEnter = (e) => {
+          e.preventDefault()
+          dragDepth += 1
+          el.classList.add('drag')
+        }
+        const onDragOver = (e) => {
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+        }
+        const onDragLeave = (e) => {
+          e.preventDefault()
+          dragDepth = Math.max(0, dragDepth - 1)
+          if (dragDepth === 0) el.classList.remove('drag')
+        }
+        const onDrop = async (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          dragDepth = 0
+          el.classList.remove('drag')
+          if (!state.room) {
+            showError('Join the room first, then drop files')
+            return
+          }
+          const files = await filesFromDataTransfer(e.dataTransfer)
+          if (!files.length) {
+            showToast('Nothing to drop — try Attach or Paste')
+            return
+          }
+          for (const file of files) await sendFile(file)
+        }
+        el.addEventListener('dragenter', onDragEnter)
+        el.addEventListener('dragover', onDragOver)
+        el.addEventListener('dragleave', onDragLeave)
+        el.addEventListener('drop', onDrop)
+      }
+
+      $('joinBtn').addEventListener('click', join)
+      $('sendBtn').addEventListener('click', sendText)
+      $('pasteBtn').addEventListener('click', () => void pasteClipboard())
+      $('pasteCancel').addEventListener('click', closePasteSheet)
+      $('pasteRetry').addEventListener('click', () => void pasteClipboard())
+      $('pasteSheet').addEventListener('click', (e) => {
+        if (e.target === $('pasteSheet')) closePasteSheet()
+      })
+      $('leaveBtn').addEventListener('click', () => leave(true))
+      function openPicker() {
+        $('fileInput').click()
+      }
+      $('fileBtn').addEventListener('click', openPicker)
+      $('pickZone').addEventListener('click', openPicker)
+      $('pickZone').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openPicker()
+        }
+      })
+      bindDropZone($('pickZone'))
+      // Needed so browsers allow dropping onto the page
+      document.addEventListener('dragover', (e) => {
+        if (!state.room) return
+        e.preventDefault()
+      })
+      document.addEventListener('drop', (e) => {
+        if (!state.room) return
+        if (e.target && e.target.closest && e.target.closest('#pickZone')) return
+        e.preventDefault()
+        ;(async () => {
+          const files = await filesFromDataTransfer(e.dataTransfer)
+          if (!files.length) return
+          for (const file of files) await sendFile(file)
+        })()
+      })
+      $('fileInput').addEventListener('change', async (e) => {
+        const files = Array.from((e.target.files && e.target.files) || [])
+        e.target.value = ''
+        for (const file of files) {
+          await sendFile(file)
+        }
+      })
+      document.addEventListener('paste', handlePasteEvent)
+      $('text').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          sendText()
+        }
+      })
+
+      const savedName = localStorage.getItem('ocs-name')
+      $('name').value = savedName || 'Phone'
+      $('name').addEventListener('change', () => {
+        localStorage.setItem('ocs-name', $('name').value.trim() || 'Phone')
+      })
+
+      loadRoomInfo()
+    </script>
+  </body>
+</html>

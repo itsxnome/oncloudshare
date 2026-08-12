@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #0a0a0b;
+  color: #e4e4e7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2e;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition
+      disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-blue-500;
+  }
+  .btn-secondary {
+    @apply btn border border-border bg-surface2 text-text hover:bg-border/40;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-surface2 hover:text-text;
+  }
+  .btn-danger {
+    @apply btn border border-red-900/50 bg-red-950/40 text-red-300 hover:bg-red-900/40;
+  }
+  .input {
+    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text outline-none
+      placeholder:text-muted focus:border-accent/60 focus:ring-1 focus:ring-accent/40;
+  }
+  .card {
+    @apply rounded-xl border border-border bg-surface;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted;
+  }
+}
+
+@keyframes transfer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes transfer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+.transfer-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #2a2a2e;
+  border-top-color: #3b82f6;
+  border-radius: 999px;
+  animation: transfer-spin 0.8s linear infinite;
+}
+
+.transfer-spinner-sm {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #2a2a2e;
+  border-top-color: #3b82f6;
+  border-radius: 999px;
+  animation: transfer-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.transfer-bar-pulse {
+  animation: transfer-pulse 1.2s ease-in-out infinite;
+}
