@@ -26,14 +26,13 @@ targets:
     platform: iOS
     sources:
       - path: OnCloudShare/Sources
-      - path: OnCloudShare/Resources
-        buildPhase: resources
-        excludes:
-          - "**/*.md"
+      - path: OnCloudShare/Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_NAME: OnCloudShare
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: OnCloudShare/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: false
         INFOPLIST_KEY_CFBundleDisplayName: OnCloudShare
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
