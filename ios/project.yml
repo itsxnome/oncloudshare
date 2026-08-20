@@ -1,0 +1,40 @@
+name: OnCloudShare
+options:
+  bundleIdPrefix: com.oncloudshare
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.oncloudshare.app
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "3"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    INFOPLIST_FILE: OnCloudShare/Resources/Info.plist
+    GENERATE_INFOPLIST_FILE: false
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+targets:
+  OnCloudShare:
+    type: application
+    platform: iOS
+    sources:
+      - path: OnCloudShare/Sources
+      - path: OnCloudShare/Resources
+        buildPhase: resources
+        excludes:
+          - "**/*.md"
+    settings:
+      base:
+        PRODUCT_NAME: OnCloudShare
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: OnCloudShare
+        INFOPLIST_KEY_LSRequiresIPhoneOS: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"

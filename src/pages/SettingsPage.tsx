@@ -14,6 +14,7 @@ export default function SettingsPage({ settings, status, onSaved, onError }: Pro
   const [tunnelInfo, setTunnelInfo] = useState<TunnelDetectResult | null>(null)
   const [setupBusy, setSetupBusy] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [portable, setPortable] = useState(false)
 
   useEffect(() => {
     setForm(settings)
@@ -21,6 +22,7 @@ export default function SettingsPage({ settings, status, onSaved, onError }: Pro
 
   useEffect(() => {
     void window.oncloud.detectTunnel().then(setTunnelInfo)
+    void window.oncloud.getInstallInfo().then((info) => setPortable(info.portable))
   }, [])
 
   async function savePartial(partial: Partial<AppSettings>) {
@@ -228,15 +230,28 @@ export default function SettingsPage({ settings, status, onSaved, onError }: Pro
         </section>
 
         <section className="card space-y-4 p-5">
-          <h2 className="text-sm font-semibold">System</h2>
-          <label className="flex items-center gap-3 text-sm">
+          <h2 className="text-sm font-semibold">Startup</h2>
+          <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
+              className="mt-1"
               checked={form.startOnBoot}
               onChange={(e) => void savePartial({ startOnBoot: e.target.checked })}
             />
-            Start OnCloudShare when Windows starts
+            <span>
+              <span className="font-medium text-text">Start with Windows</span>
+              <span className="mt-1 block text-xs text-muted">
+                Launch OnCloudShare automatically when you sign in. It starts in the system tray —
+                uncheck anytime to turn this off.
+              </span>
+            </span>
           </label>
+          {portable && (
+            <div className="rounded-lg border border-amber-900/40 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-100/90">
+              You’re on the <b>portable</b> exe. Startup works, but the path can break if you move the
+              file. Prefer <b>OnCloudShare Setup</b> (installed) for a reliable login item.
+            </div>
+          )}
           <div className="rounded-lg border border-border bg-bg p-3 text-xs leading-relaxed text-muted">
             Windows may ask once to allow OnCloudShare on private networks — accept that so LAN
             discovery works. Ports 47891–47899.

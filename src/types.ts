@@ -165,6 +165,11 @@ declare global {
       sendFilePath: (filePath: string, name?: string, mimeType?: string) => Promise<void>
       getLocalIpHint: () => Promise<string[]>
       dismissFirstRun: () => Promise<void>
+      getInstallInfo: () => Promise<{
+        portable: boolean
+        startOnBoot: boolean
+        openAtLogin: boolean
+      }>
       checkForUpdates: () => Promise<UpdateInfo>
       openUpdatePage: (url?: string) => Promise<void>
       dismissUpdate: (version: string) => Promise<AppSettings>

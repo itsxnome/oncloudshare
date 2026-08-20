@@ -38,6 +38,17 @@ const settings = createSettingsStore()
 const tunnel = new TunnelManager()
 let share: ShareServer
 
+// Prevent ghost Electron processes with no visible window when the exe is
+// launched again while already running in the tray.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    showMainWindow()
+  })
+}
+
 function send(channel: string, payload: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload)
@@ -71,7 +82,13 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
+    if (launchedFromWindowsStartup()) {
+      // Stay in tray on login; user can open from the tray icon
+      mainWindow?.hide()
+      notify('OnCloudShare is running', 'Started with Windows — open it from the tray')
+    } else {
+      mainWindow?.show()
+    }
   })
 
   mainWindow.on('close', (e) => {
@@ -110,11 +127,14 @@ function buildTrayMenu() {
     {
       label: 'Show Window',
       click: () => {
-        mainWindow?.show()
-        mainWindow?.focus()
+        showMainWindow()
       },
     },
-    { label: 'Paste Clipboard (text/image)', click: () => void sendClipboard(), enabled: Boolean(status.room) },
+    {
+      label: 'Paste Clipboard (text/image)',
+      click: () => void sendClipboard(),
+      enabled: Boolean(status.room),
+    },
     { type: 'separator' },
     {
       label: 'Quit',
@@ -130,10 +150,8 @@ function createTray() {
   tray = new Tray(trayIcon())
   tray.setToolTip('OnCloudShare')
   tray.setContextMenu(buildTrayMenu())
-  tray.on('double-click', () => {
-    mainWindow?.show()
-    mainWindow?.focus()
-  })
+  tray.on('click', () => showMainWindow())
+  tray.on('double-click', () => showMainWindow())
 }
 
 function refreshTray() {
@@ -175,14 +193,46 @@ async function sendClipboard() {
   }
 }
 
+function isPortableBuild() {
+  return Boolean(
+    process.env.PORTABLE_EXECUTABLE_DIR ||
+      process.env.PORTABLE_EXECUTABLE_FILE ||
+      /portable/i.test(process.execPath),
+  )
+}
+
 function applyStartOnBoot(enabled: boolean) {
   try {
+    // Portable builds can register too, but the path may move; Setup install is preferred.
     app.setLoginItemSettings({
       openAtLogin: enabled,
+      openAsHidden: true,
+      name: 'OnCloudShare',
       path: process.execPath,
+      args: enabled ? ['--startup'] : [],
     })
   } catch {
     /* ignore on unsupported platforms */
+  }
+}
+
+function launchedFromWindowsStartup() {
+  // Only trust an explicit flag we register ourselves.
+  // wasOpenedAtLogin is unreliable and was hiding the window on normal launches.
+  return process.argv.includes('--startup')
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  if (process.platform === 'win32') {
+    mainWindow.setAlwaysOnTop(true)
+    mainWindow.setAlwaysOnTop(false)
   }
 }
 
@@ -390,6 +440,19 @@ function registerIpc() {
     }
   })
   ipcMain.handle('net:localIps', () => getLocalIps())
+  ipcMain.handle('app:getInstallInfo', () => {
+    let openAtLogin = false
+    try {
+      openAtLogin = Boolean(app.getLoginItemSettings().openAtLogin)
+    } catch {
+      openAtLogin = settings.get().startOnBoot
+    }
+    return {
+      portable: isPortableBuild(),
+      startOnBoot: settings.get().startOnBoot,
+      openAtLogin,
+    }
+  })
   ipcMain.handle('app:dismissFirstRun', () => {
     settings.set({ firstRunDone: true })
   })
@@ -461,6 +524,15 @@ app.whenReady().then(async () => {
   const s = settings.get()
   ensureDir(s.downloadFolder)
   applyStartOnBoot(s.startOnBoot)
+  // Keep Windows login item in sync after updates / moves
+  try {
+    const login = app.getLoginItemSettings()
+    if (Boolean(login.openAtLogin) !== Boolean(s.startOnBoot)) {
+      applyStartOnBoot(s.startOnBoot)
+    }
+  } catch {
+    /* ignore */
+  }
 
   share = new ShareServer({
     onStatus: (status: ServerStatus) => {
@@ -532,8 +604,7 @@ app.whenReady().then(async () => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    else mainWindow?.show()
+    showMainWindow()
   })
 })
 
@@ -546,7 +617,7 @@ app.on('before-quit', async () => {
 })
 
 app.on('window-all-closed', () => {
-  // Keep tray alive on Windows/Linux
+  // Keep tray alive on Windows/Linux — do not quit when the window is hidden
   if (process.platform === 'darwin') {
     app.quit()
   }

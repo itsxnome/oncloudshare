@@ -6,7 +6,7 @@ Local-first desktop app for sharing **text**, **clipboard** (text & images), and
 - Different networks → Cloudflare tunnel (or a pasted ngrok URL)
 - No Discord, WhatsApp, or cloud drive required
 
-**Current version:** [`1.1.0`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.1.0) (Electron + React)
+**Current version:** [`1.2.0`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.2.0) (Electron + React · iOS AltStore)
 
 ---
 
@@ -16,12 +16,19 @@ Official builds are published on **[GitHub Releases](https://github.com/itsxnome
 
 | Asset | What it is |
 | --- | --- |
-| [`OnCloudShare 1.1.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing (~84 MB) |
-| [`OnCloudShare Setup 1.1.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | NSIS installer (supports auto-update) |
+| [`OnCloudShare 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing |
+| [`OnCloudShare Setup 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | NSIS installer (supports auto-update + Start with Windows) |
+| `OnCloudShare-1.2.0.ipa` | iOS app for **AltStore** |
 
 > Only releases **authorized by the project owner** are published here. Prefer downloading from GitHub Releases, not random mirrors.
 
 ---
+
+## What’s new in 1.2.0
+
+- **Windows fix** — single-instance lock + reliable window show (no more invisible Electron processes)
+- **iOS AltStore app** — native SwiftUI client, local IPA update via share sheet
+- **Start with Windows** — optional tray launch (Setup installer recommended)
 
 ## What’s new in 1.1.0
 
@@ -76,6 +83,16 @@ Allow OnCloudShare through Windows Firewall for **Private** networks (ports **47
 
 ---
 
+## iOS app (AltStore)
+
+A native SwiftUI client lives in [`ios/`](ios/README.md).
+
+- Install via **AltStore** using the `.ipa` attached to [GitHub Releases](https://github.com/itsxnome/oncloudshare/releases/latest)
+- In-app **Update** downloads the IPA to the phone, then opens the share sheet so you can choose **Open in AltStore** (GitHub temporary CDN URLs are never passed to `altstore://install?url=`)
+- CI workflow builds the IPA on macOS and replaces older IPA assets so releases don’t pile up
+
+---
+
 ## Features (what works today)
 
 - Create / join rooms with short codes and optional PIN
@@ -85,6 +102,7 @@ Allow OnCloudShare through Windows Firewall for **Private** networks (ports **47
 - File size defaults to **unlimited** (`0` in Settings)
 - History of saved downloads
 - System tray + global shortcut `Ctrl+Shift+V`
+- **Start with Windows** (Settings) — optional; starts in the tray; works best with the Setup installer
 - Auto Cloudflare tunnel (`cloudflared` on demand)
 - Mobile web join page (`/`, `/m`, `/mobile`) with QR
 - Phone WebSocket chunk uploads + background reconnect / queue resume

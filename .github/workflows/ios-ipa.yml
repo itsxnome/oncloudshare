@@ -1,0 +1,77 @@
+name: Build iOS IPA (AltStore)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build IPA
+        working-directory: ios
+        run: |
+          chmod +x scripts/build-ipa.sh
+          ./scripts/build-ipa.sh "$(pwd)/build/OnCloudShare.ipa"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnCloudShare-ipa
+          path: ios/build/OnCloudShare.ipa
+
+      - name: Attach IPA to GitHub Release + prune old IPAs
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+
+          # Wait until the release exists (tag push may race ahead of manual release create)
+          for i in $(seq 1 30); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          IPA="ios/build/OnCloudShare.ipa"
+          VERSION="${TAG#v}"
+          NAMED="OnCloudShare-${VERSION}.ipa"
+          cp "$IPA" "$NAMED"
+
+          # Remove any previous .ipa assets from THIS release, then upload the new one
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | test("\\.ipa$"; "i")) | .name')
+          for a in $ASSETS; do
+            echo "Deleting old IPA asset: $a"
+            gh release delete-asset "$TAG" "$a" --yes || true
+          done
+
+          gh release upload "$TAG" "$NAMED" --clobber
+
+          # Also prune IPA assets from older releases so artifacts don't pile up
+          gh release list --limit 50 --json tagName --jq '.[].tagName' | while read -r old; do
+            if [ "$old" = "$TAG" ]; then continue; fi
+            OLD_ASSETS=$(gh release view "$old" --json assets --jq '.assets[] | select(.name | test("\\.ipa$"; "i")) | .name' || true)
+            for a in $OLD_ASSETS; do
+              echo "Pruning IPA from $old: $a"
+              gh release delete-asset "$old" "$a" --yes || true
+            done
+          done

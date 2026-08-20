@@ -77,6 +77,11 @@ contextBridge.exposeInMainWorld('oncloud', {
     ipcRenderer.invoke('files:sendPath', filePath, name, mimeType),
   getLocalIpHint: (): Promise<string[]> => ipcRenderer.invoke('net:localIps'),
   dismissFirstRun: (): Promise<void> => ipcRenderer.invoke('app:dismissFirstRun'),
+  getInstallInfo: (): Promise<{
+    portable: boolean
+    startOnBoot: boolean
+    openAtLogin: boolean
+  }> => ipcRenderer.invoke('app:getInstallInfo'),
   checkForUpdates: (): Promise<import('./shared/types').UpdateInfo> =>
     ipcRenderer.invoke('updates:check'),
   openUpdatePage: (url?: string): Promise<void> => ipcRenderer.invoke('updates:open', url),
