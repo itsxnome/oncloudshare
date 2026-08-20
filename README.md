@@ -6,7 +6,7 @@ Local-first desktop app for sharing **text**, **clipboard** (text & images), and
 - Different networks → Cloudflare tunnel (or a pasted ngrok URL)
 - No Discord, WhatsApp, or cloud drive required
 
-**Current version:** [`1.2.0`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.2.0) (Electron + React · iOS AltStore)
+**Current version:** [`1.2.1`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.2.1) (Electron + React · iOS AltStore)
 
 ---
 
@@ -16,13 +16,21 @@ Official builds are published on **[GitHub Releases](https://github.com/itsxnome
 
 | Asset | What it is |
 | --- | --- |
-| [`OnCloudShare 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing |
+| [`OnCloudShare 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing (Windows unchanged in 1.2.1) |
 | [`OnCloudShare Setup 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | NSIS installer (supports auto-update + Start with Windows) |
-| `OnCloudShare-1.2.0.ipa` | iOS app for **AltStore** |
+| `OnCloudShare-1.2.1.ipa` | iOS app for **AltStore** |
 
 > Only releases **authorized by the project owner** are published here. Prefer downloading from GitHub Releases, not random mirrors.
 
 ---
+
+## What’s new in 1.2.1
+
+- **iOS Create room** — host on your iPhone (LAN WebSocket + Bonjour)
+- **Check for updates** button — manual GitHub Releases fetch with clear status
+- **Debug log** with Copy all
+- **Changelog** screen
+- **App icon** fixed (no more blank home-screen icon)
 
 ## What’s new in 1.2.0
 

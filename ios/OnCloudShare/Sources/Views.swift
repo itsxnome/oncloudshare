@@ -3,6 +3,9 @@ import PhotosUI
 
 struct RootView: View {
   @EnvironmentObject private var model: AppModel
+  @ObservedObject private var debugLog = DebugLog.shared
+  @State private var showDebug = false
+  @State private var showChangelog = false
 
   var body: some View {
     ZStack {
@@ -11,9 +14,9 @@ struct RootView: View {
 
       Group {
         if model.room != nil {
-          RoomView()
+          RoomView(showDebug: $showDebug, showChangelog: $showChangelog)
         } else {
-          HomeView()
+          HomeView(showDebug: $showDebug, showChangelog: $showChangelog)
         }
       }
     }
@@ -35,6 +38,13 @@ struct RootView: View {
       }
     }
     .animation(.spring(response: 0.35, dampingFraction: 0.86), value: model.toast)
+    .sheet(isPresented: $showDebug) {
+      DebugLogView()
+        .environmentObject(debugLog)
+    }
+    .sheet(isPresented: $showChangelog) {
+      ChangelogView()
+    }
   }
 }
 
@@ -60,9 +70,11 @@ struct AmbientBackground: View {
 
 struct HomeView: View {
   @EnvironmentObject private var model: AppModel
+  @Binding var showDebug: Bool
+  @Binding var showChangelog: Bool
   @FocusState private var focused: Field?
 
-  enum Field { case name, link, code, pin }
+  enum Field { case name, hostName, hostPin, link, code, pin }
 
   var body: some View {
     ScrollView {
@@ -71,7 +83,7 @@ struct HomeView: View {
           Text("OnCloudShare")
             .font(.system(size: 40, weight: .bold, design: .rounded))
             .foregroundStyle(OCSTheme.text)
-          Text("Join your PC room from this phone — no cloud drive, no chat apps.")
+          Text("Create a room on this phone or join a PC — local Wi‑Fi, no cloud drive.")
             .font(.body)
             .foregroundStyle(OCSTheme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -80,11 +92,40 @@ struct HomeView: View {
 
         if let update = model.updateAvailable {
           UpdateBanner(asset: update)
+        } else {
+          UpdateCheckCard()
         }
 
         GlassCard {
           VStack(alignment: .leading, spacing: 14) {
+            Text("Create room")
+              .font(.headline)
+              .foregroundStyle(OCSTheme.text)
+            Text("Host on this iPhone. PCs on the same Wi‑Fi can join via Bonjour or the LAN link.")
+              .font(.caption)
+              .foregroundStyle(OCSTheme.muted)
             labeledField("Your name", text: $model.displayName, field: .name)
+            labeledField("Room name", text: $model.hostRoomName, field: .hostName)
+            labeledField("PIN (optional)", text: $model.hostPin, field: .hostPin, prompt: "Guests must enter this")
+              .keyboardType(.numberPad)
+
+            Button("Create room") {
+              model.createRoom()
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(model.connection == .connecting)
+
+            Text("Remote Cloudflare tunnels are PC-only for now — phone hosting is LAN.")
+              .font(.caption2)
+              .foregroundStyle(OCSTheme.muted)
+          }
+        }
+
+        GlassCard {
+          VStack(alignment: .leading, spacing: 14) {
+            Text("Join room")
+              .font(.headline)
+              .foregroundStyle(OCSTheme.text)
             labeledField("Share link", text: $model.joinLink, field: .link, prompt: "https://….trycloudflare.com or LAN IP")
             labeledField("Room code", text: $model.joinCode, field: .code, prompt: "ABC123")
               .textInputAutocapitalization(.characters)
@@ -101,13 +142,31 @@ struct HomeView: View {
           }
         }
 
+        HStack(spacing: 10) {
+          Button {
+            showChangelog = true
+          } label: {
+            Label("Changelog", systemImage: "list.bullet.rectangle")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryButtonStyle())
+
+          Button {
+            showDebug = true
+          } label: {
+            Label("Debug log", systemImage: "ladybug")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryButtonStyle())
+        }
+
         GlassCard {
           VStack(alignment: .leading, spacing: 8) {
             Text("How it works")
               .font(.headline)
               .foregroundStyle(OCSTheme.text)
-            tip("Create a room on your Windows PC")
-            tip("Scan the QR or paste the remote / LAN link here")
+            tip("Create a room here or on Windows")
+            tip("Same Wi‑Fi: share the LAN link or room code")
             tip("Keep this app open while sending large files")
           }
         }
@@ -138,8 +197,8 @@ struct HomeView: View {
 
   private var statusText: String {
     switch model.connection {
-    case .idle: return "Ready to join"
-    case .connecting: return "Connecting…"
+    case .idle: return "Ready"
+    case .connecting: return "Starting…"
     case .connected: return "Connected"
     case .reconnecting: return "Reconnecting…"
     case .failed(let m): return m
@@ -180,6 +239,43 @@ struct HomeView: View {
   }
 }
 
+struct UpdateCheckCard: View {
+  @EnvironmentObject private var model: AppModel
+
+  var body: some View {
+    GlassCard {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("App updates")
+          .font(.headline)
+          .foregroundStyle(OCSTheme.text)
+        Text("Installed \(model.installedVersion) · build \(model.installedBuild)")
+          .font(.caption.monospaced())
+          .foregroundStyle(OCSTheme.muted)
+        if model.updateCheckBusy {
+          ProgressView(value: nil as Double?)
+            .tint(OCSTheme.accent)
+          Text(model.lastUpdateCheckMessage.isEmpty ? "Checking…" : model.lastUpdateCheckMessage)
+            .font(.caption)
+            .foregroundStyle(OCSTheme.muted)
+        } else {
+          Button {
+            model.checkForUpdates()
+          } label: {
+            Label("Check for updates", systemImage: "arrow.clockwise")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryButtonStyle())
+          if !model.lastUpdateCheckMessage.isEmpty {
+            Text(model.lastUpdateCheckMessage)
+              .font(.caption2)
+              .foregroundStyle(OCSTheme.muted)
+          }
+        }
+      }
+    }
+  }
+}
+
 struct UpdateBanner: View {
   @EnvironmentObject private var model: AppModel
   let asset: AppReleaseAsset
@@ -193,6 +289,9 @@ struct UpdateBanner: View {
         Text(asset.name)
           .font(.caption)
           .foregroundStyle(OCSTheme.muted)
+        Text("Installed \(model.installedVersion) · build \(model.installedBuild)")
+          .font(.caption2.monospaced())
+          .foregroundStyle(OCSTheme.muted)
         if model.updateBusy {
           ProgressView(value: nil as Double?)
             .tint(OCSTheme.accent)
@@ -204,6 +303,14 @@ struct UpdateBanner: View {
             Task { await model.downloadAndShareUpdate() }
           }
           .buttonStyle(PrimaryButtonStyle())
+          Button {
+            model.checkForUpdates()
+          } label: {
+            Label("Check again", systemImage: "arrow.clockwise")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryButtonStyle())
+          .disabled(model.updateCheckBusy)
           Text("Downloads the IPA to this phone, then share → Open in AltStore. GitHub links are not passed to AltStore directly.")
             .font(.caption2)
             .foregroundStyle(OCSTheme.muted)
@@ -215,6 +322,8 @@ struct UpdateBanner: View {
 
 struct RoomView: View {
   @EnvironmentObject private var model: AppModel
+  @Binding var showDebug: Bool
+  @Binding var showChangelog: Bool
   @State private var photoItem: PhotosPickerItem?
   @State private var showImporter = false
 
@@ -223,6 +332,9 @@ struct RoomView: View {
       header
       ScrollView {
         LazyVStack(spacing: 12) {
+          if model.isHosting {
+            HostInfoCard()
+          }
           ForEach(model.items) { item in
             ItemRow(item: item)
           }
@@ -245,15 +357,31 @@ struct RoomView: View {
             .foregroundStyle(OCSTheme.accent)
         }
         Spacer()
-        Button("Leave") { model.leave() }
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(OCSTheme.danger)
+        Menu {
+          Button("Copy room code") { model.copyRoomCode() }
+          if model.isHosting {
+            Button("Copy LAN link") { model.copyHostLink() }
+          }
+          Button("Check for updates") { model.checkForUpdates() }
+          Button("Changelog") { showChangelog = true }
+          Button("Debug log") { showDebug = true }
+          Divider()
+          Button(model.isHosting ? "Close room" : "Leave", role: .destructive) { model.leave() }
+        } label: {
+          Image(systemName: "ellipsis.circle")
+            .font(.title3)
+            .foregroundStyle(OCSTheme.text)
+        }
       }
       HStack(spacing: 8) {
         Circle().fill(OCSTheme.online).frame(width: 7, height: 7)
-        Text("\(model.peers.count) online · keep this app open while sending")
-          .font(.caption)
-          .foregroundStyle(OCSTheme.muted)
+        Text(
+          model.isHosting
+            ? "Hosting · \(model.peers.count) online · keep app open"
+            : "\(model.peers.count) online · keep this app open while sending"
+        )
+        .font(.caption)
+        .foregroundStyle(OCSTheme.muted)
       }
       if model.uploadProgress > 0 && model.uploadProgress < 1 {
         ProgressView(value: model.uploadProgress)
@@ -314,6 +442,35 @@ struct RoomView: View {
   }
 }
 
+struct HostInfoCard: View {
+  @EnvironmentObject private var model: AppModel
+
+  var body: some View {
+    GlassCard {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("You're hosting")
+          .font(.headline)
+          .foregroundStyle(OCSTheme.text)
+        Text("Same Wi‑Fi only. On a PC, open OnCloudShare and join nearby, or paste a link below.")
+          .font(.caption)
+          .foregroundStyle(OCSTheme.muted)
+        ForEach(model.lanURLs, id: \.self) { url in
+          Text(url)
+            .font(.caption.monospaced())
+            .foregroundStyle(OCSTheme.accent)
+            .textSelection(.enabled)
+        }
+        HStack(spacing: 10) {
+          Button("Copy link") { model.copyHostLink() }
+            .buttonStyle(SecondaryButtonStyle())
+          Button("Copy code") { model.copyRoomCode() }
+            .buttonStyle(SecondaryButtonStyle())
+        }
+      }
+    }
+  }
+}
+
 struct ItemRow: View {
   let item: RoomItem
 
@@ -350,5 +507,121 @@ struct ItemRow: View {
   private var timeString: String {
     let date = Date(timeIntervalSince1970: item.createdAt / 1000)
     return date.formatted(date: .omitted, time: .shortened)
+  }
+}
+
+struct DebugLogView: View {
+  @EnvironmentObject private var log: DebugLog
+  @Environment(\.dismiss) private var dismiss
+  @State private var copied = false
+
+  var body: some View {
+    NavigationStack {
+      ZStack {
+        OCSTheme.bg.ignoresSafeArea()
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 8) {
+            if log.lines.isEmpty {
+              Text("No logs yet. Create or join a room to see activity.")
+                .font(.subheadline)
+                .foregroundStyle(OCSTheme.muted)
+                .padding(.top, 24)
+            } else {
+              ForEach(log.lines.reversed()) { line in
+                Text(line.formatted)
+                  .font(.system(.caption, design: .monospaced))
+                  .foregroundStyle(color(for: line.level))
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .textSelection(.enabled)
+              }
+            }
+          }
+          .padding(16)
+        }
+      }
+      .navigationTitle("Debug log")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Close") { dismiss() }
+        }
+        ToolbarItem(placement: .primaryAction) {
+          HStack {
+            Button("Clear") { log.clear() }
+            Button(copied ? "Copied" : "Copy all") {
+              UIPasteboard.general.string = log.allText
+              copied = true
+              ocsLog("Debug log copied (\(log.lines.count) lines)")
+              DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+            }
+            .disabled(log.lines.isEmpty)
+          }
+        }
+      }
+    }
+    .preferredColorScheme(.dark)
+  }
+
+  private func color(for level: LogLevel) -> Color {
+    switch level {
+    case .debug: return OCSTheme.muted
+    case .info: return OCSTheme.text
+    case .warn: return .orange
+    case .error: return OCSTheme.danger
+    }
+  }
+}
+
+struct ChangelogView: View {
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    NavigationStack {
+      ZStack {
+        OCSTheme.bg.ignoresSafeArea()
+        ScrollView {
+          VStack(alignment: .leading, spacing: 16) {
+            ForEach(Changelog.entries) { entry in
+              GlassCard {
+                VStack(alignment: .leading, spacing: 10) {
+                  HStack {
+                    Text(entry.version)
+                      .font(.headline)
+                      .foregroundStyle(entry.upcoming ? .orange : OCSTheme.accent)
+                    Spacer()
+                    Text(entry.date)
+                      .font(.caption)
+                      .foregroundStyle(OCSTheme.muted)
+                  }
+                  Text(entry.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(OCSTheme.text)
+                  ForEach(entry.items, id: \.self) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                      Image(systemName: entry.upcoming ? "circle" : "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(entry.upcoming ? OCSTheme.muted : OCSTheme.online)
+                        .padding(.top, 2)
+                      Text(item)
+                        .font(.subheadline)
+                        .foregroundStyle(OCSTheme.muted)
+                    }
+                  }
+                }
+              }
+            }
+          }
+          .padding(16)
+        }
+      }
+      .navigationTitle("Changelog")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Close") { dismiss() }
+        }
+      }
+    }
+    .preferredColorScheme(.dark)
   }
 }

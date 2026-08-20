@@ -36,7 +36,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OnCloudShare finds your PC on the same Wi‑Fi to share text and files without the cloud.</string>
+	<string>OnCloudShare creates and finds rooms on your Wi‑Fi to share text and files without the cloud.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_oncloudshare._tcp</string>
