@@ -16,13 +16,25 @@ enum Changelog {
       date: "Planned",
       title: "Coming soon",
       items: [
-        "Full phone-hosted Cloudflare / remote tunnel",
+        "Cloudflare-style tunnels on iPhone (when possible without a helper binary)",
         "Stronger multi-GB resume on iOS host",
         "LAN device picker with one-tap join",
         "Optional end-to-end encryption on iOS",
         "Rust / iroh engine for free global multi-GB P2P",
       ],
       upcoming: true
+    ),
+    ChangelogEntry(
+      version: "1.2.2",
+      date: "2026-08-21",
+      title: "Public rooms + QR on iPhone",
+      items: [
+        "Public room toggle — temporary internet link (loca.lt tunnel)",
+        "QR code for public or LAN join links",
+        "Copy public link / regenerate / retry",
+        "Bypass header so apps can join loca.lt tunnels cleanly",
+      ],
+      upcoming: false
     ),
     ChangelogEntry(
       version: "1.2.1",
@@ -33,6 +45,7 @@ enum Changelog {
         "Debug log viewer with Copy all",
         "Changelog screen (past + upcoming)",
         "Real app icon (fixes blank home-screen icon)",
+        "Check for updates button",
       ],
       upcoming: false
     ),

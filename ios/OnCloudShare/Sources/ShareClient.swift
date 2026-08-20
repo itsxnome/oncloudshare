@@ -34,7 +34,11 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
       onError?("Invalid share link")
       return
     }
-    let task = session.webSocketTask(with: wsURL)
+    var req = URLRequest(url: wsURL)
+    // loca.lt interstitial bypass for public tunnels
+    req.setValue("true", forHTTPHeaderField: "Bypass-Tunnel-Reminder")
+    req.setValue("OnCloudShare-iOS", forHTTPHeaderField: "User-Agent")
+    let task = session.webSocketTask(with: req)
     self.task = task
     task.resume()
     listen()

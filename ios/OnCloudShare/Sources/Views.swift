@@ -109,13 +109,26 @@ struct HomeView: View {
             labeledField("PIN (optional)", text: $model.hostPin, field: .hostPin, prompt: "Guests must enter this")
               .keyboardType(.numberPad)
 
+            Toggle(isOn: $model.hostPublic) {
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Public room")
+                  .foregroundStyle(OCSTheme.text)
+                Text("Anyone with the link can join (not just Wi‑Fi). Uses a free temporary tunnel.")
+                  .font(.caption2)
+                  .foregroundStyle(OCSTheme.muted)
+              }
+            }
+            .tint(OCSTheme.accent)
+
             Button("Create room") {
               model.createRoom()
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(model.connection == .connecting)
 
-            Text("Remote Cloudflare tunnels are PC-only for now — phone hosting is LAN.")
+            Text(model.hostPublic
+              ? "Public link + QR appear after the room starts. Keep the app open."
+              : "LAN only — turn on Public room for remote guests.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }
@@ -165,9 +178,9 @@ struct HomeView: View {
             Text("How it works")
               .font(.headline)
               .foregroundStyle(OCSTheme.text)
-            tip("Create a room here or on Windows")
-            tip("Same Wi‑Fi: share the LAN link or room code")
-            tip("Keep this app open while sending large files")
+            tip("Create a room here (LAN or Public) or on Windows")
+            tip("Share the link / QR — remote guests use the public URL")
+            tip("Keep this app open while hosting or sending large files")
           }
         }
       }
@@ -360,7 +373,15 @@ struct RoomView: View {
         Menu {
           Button("Copy room code") { model.copyRoomCode() }
           if model.isHosting {
-            Button("Copy LAN link") { model.copyHostLink() }
+            Button("Copy share link") { model.copyHostLink() }
+            if model.tunnelStatus != .active {
+              Button("Enable public link") {
+                model.hostPublic = true
+                model.regeneratePublicTunnel()
+              }
+            } else {
+              Button("New public link") { model.regeneratePublicTunnel() }
+            }
           }
           Button("Check for updates") { model.checkForUpdates() }
           Button("Changelog") { showChangelog = true }
@@ -447,19 +468,74 @@ struct HostInfoCard: View {
 
   var body: some View {
     GlassCard {
-      VStack(alignment: .leading, spacing: 10) {
+      VStack(alignment: .leading, spacing: 12) {
         Text("You're hosting")
           .font(.headline)
           .foregroundStyle(OCSTheme.text)
-        Text("Same Wi‑Fi only. On a PC, open OnCloudShare and join nearby, or paste a link below.")
-          .font(.caption)
-          .foregroundStyle(OCSTheme.muted)
-        ForEach(model.lanURLs, id: \.self) { url in
-          Text(url)
-            .font(.caption.monospaced())
-            .foregroundStyle(OCSTheme.accent)
-            .textSelection(.enabled)
+
+        if let share = model.bestShareURL {
+          VStack(spacing: 8) {
+            QRCodeView(string: share, size: 168)
+            Text(model.publicShareURL != nil ? "Scan to join (public)" : "Scan to join (LAN)")
+              .font(.caption)
+              .foregroundStyle(OCSTheme.muted)
+          }
+          .frame(maxWidth: .infinity)
         }
+
+        if model.tunnelStatus == .starting {
+          HStack(spacing: 8) {
+            ProgressView().tint(OCSTheme.accent)
+            Text("Creating public link…")
+              .font(.caption)
+              .foregroundStyle(OCSTheme.muted)
+          }
+        }
+
+        if model.tunnelStatus == .active, let pub = model.publicShareURL {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("PUBLIC")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(OCSTheme.online)
+            Text(pub)
+              .font(.caption.monospaced())
+              .foregroundStyle(OCSTheme.accent)
+              .textSelection(.enabled)
+            Text("Temporary free tunnel · keep this app open. First browser visit may show a brief reminder page — tap continue.")
+              .font(.caption2)
+              .foregroundStyle(OCSTheme.muted)
+          }
+        }
+
+        if model.tunnelStatus == .error {
+          Text(model.tunnelError ?? "Public link failed")
+            .font(.caption)
+            .foregroundStyle(OCSTheme.danger)
+          Button("Retry public link") { model.regeneratePublicTunnel() }
+            .buttonStyle(SecondaryButtonStyle())
+        } else if model.tunnelStatus == .idle {
+          Button("Enable public link") {
+            model.hostPublic = true
+            model.regeneratePublicTunnel()
+          }
+          .buttonStyle(SecondaryButtonStyle())
+        } else if model.tunnelStatus == .active {
+          Button("New public link") { model.regeneratePublicTunnel() }
+            .buttonStyle(SecondaryButtonStyle())
+        }
+
+        VStack(alignment: .leading, spacing: 6) {
+          Text("LAN")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(OCSTheme.muted)
+          ForEach(model.lanURLs, id: \.self) { url in
+            Text(url)
+              .font(.caption.monospaced())
+              .foregroundStyle(OCSTheme.accent)
+              .textSelection(.enabled)
+          }
+        }
+
         HStack(spacing: 10) {
           Button("Copy link") { model.copyHostLink() }
             .buttonStyle(SecondaryButtonStyle())

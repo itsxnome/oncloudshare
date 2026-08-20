@@ -39,12 +39,20 @@ final class RoomHost {
   private var transfers: [String: IncomingTransfer] = [:]
   private let staging: URL
   private let maxItems = 200
+  private var tunnelUrl: String?
 
   var onRoomReady: ((RoomInfo, [String], UInt16) -> Void)?
   var onPeers: (([PeerInfo]) -> Void)?
   var onItems: (([RoomItem]) -> Void)?
   var onError: ((String) -> Void)?
   var onLog: ((String, LogLevel) -> Void)?
+
+  func setTunnelUrl(_ url: String?) {
+    workQueue.async { [weak self] in
+      self?.tunnelUrl = url
+      self?.log("Tunnel URL set: \(url ?? "nil")", .info)
+    }
+  }
 
   init() {
     staging = FileManager.default.temporaryDirectory.appendingPathComponent("ocs-host", isDirectory: true)
@@ -120,6 +128,7 @@ final class RoomHost {
     self.pin = trimmedPin.isEmpty ? nil : trimmedPin
     self.hostPeerId = hostPeerId
     self.roomCode = Self.generateCode()
+    self.tunnelUrl = nil
     self.peers = [[
       "id": hostPeerId,
       "name": self.hostName,
@@ -363,6 +372,7 @@ final class RoomHost {
       "localIps": Self.localIPv4s(),
     ]
     if let pin { room["pin"] = pin }
+    if let tunnelUrl { room["tunnelUrl"] = tunnelUrl }
     peer.sendJSON([
       "type": "welcome",
       "peerId": peer.peerId,
@@ -481,7 +491,7 @@ final class RoomHost {
       name: roomName,
       hostName: hostName,
       port: Int(port),
-      tunnelUrl: nil,
+      tunnelUrl: tunnelUrl,
       hasPin: pin != nil
     )
     DispatchQueue.main.async { [weak self] in

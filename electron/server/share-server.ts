@@ -542,7 +542,12 @@ export class ShareServer {
       const peerId = isReconnect && this.guestPeerId ? this.guestPeerId : randomBytes(8).toString('hex')
       this.guestPeerId = peerId
       let settled = false
-      const ws = new WebSocket(wsUrl)
+      const ws = new WebSocket(wsUrl, {
+        headers: {
+          'User-Agent': 'OnCloudShare',
+          'Bypass-Tunnel-Reminder': 'true',
+        },
+      })
       this.guestWs = ws
 
       const fail = (error: string) => {

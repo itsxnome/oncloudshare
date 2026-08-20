@@ -13,9 +13,22 @@ final class AppModel: ObservableObject {
   @Published var joinLink: String = ""
   @Published var hostRoomName: String = "iPhone Room"
   @Published var hostPin: String = ""
+  @Published var hostPublic = true
   @Published var isHosting = false
   @Published var lanURLs: [String] = []
+  @Published var publicURL: String?
+  @Published var publicShareURL: String?
+  @Published var tunnelStatus: TunnelUIStatus = .idle
+  @Published var tunnelError: String?
+  @Published var hostPort: UInt16 = 0
   @Published var connection: ConnectionState = .idle
+
+  enum TunnelUIStatus: Equatable {
+    case idle
+    case starting
+    case active
+    case error
+  }
   @Published var room: RoomInfo?
   @Published var peers: [PeerInfo] = []
   @Published var items: [RoomItem] = []
@@ -122,9 +135,13 @@ final class AppModel: ObservableObject {
         self.room = room
         self.isHosting = true
         self.connection = .connected
+        self.hostPort = port
         self.lanURLs = ips.map { "http://\($0):\(port)?code=\(room.code)" }
-        self.toast = "Room \(room.code) is live on Wi‑Fi"
+        self.toast = self.hostPublic ? "Room \(room.code) live — starting public link…" : "Room \(room.code) is live on Wi‑Fi"
         ocsLog("Host ready · \(self.lanURLs.first ?? "")")
+        if self.hostPublic {
+          await self.startPublicTunnel()
+        }
       }
     }
     host.onPeers = { [weak self] peers in
@@ -143,13 +160,51 @@ final class AppModel: ObservableObject {
     }
     connection = .connecting
     isHosting = true
-    ocsLog("Create room requested")
+    publicURL = nil
+    publicShareURL = nil
+    tunnelStatus = hostPublic ? .starting : .idle
+    tunnelError = nil
+    ocsLog("Create room requested · public=\(hostPublic)")
+    PublicTunnel.shared.onLog = { message, level in ocsLog(message, level: level) }
     host.start(
       roomName: hostRoomName,
       hostName: displayName,
       pin: hostPin,
       hostPeerId: client.peerId
     )
+  }
+
+  func startPublicTunnel() async {
+    guard isHosting, hostPort > 0, let code = room?.code else { return }
+    tunnelStatus = .starting
+    tunnelError = nil
+    ocsLog("Starting public tunnel on port \(hostPort)")
+    do {
+      let url = try await PublicTunnel.shared.start(localPort: hostPort)
+      let base = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+      publicURL = base
+      publicShareURL = "\(base)?code=\(code)"
+      host.setTunnelUrl(base)
+      var updated = room
+      updated?.tunnelUrl = base
+      room = updated
+      tunnelStatus = .active
+      toast = "Public link ready"
+      ocsLog("Public share URL \(publicShareURL ?? "")")
+    } catch {
+      tunnelStatus = .error
+      tunnelError = error.localizedDescription
+      toast = "Public link failed — LAN still works"
+      ocsLog("Public tunnel failed: \(error.localizedDescription)", level: .error)
+    }
+  }
+
+  func regeneratePublicTunnel() {
+    Task { await startPublicTunnel() }
+  }
+
+  var bestShareURL: String? {
+    publicShareURL ?? lanURLs.first
   }
 
   func joinFromFields() {
@@ -199,6 +254,7 @@ final class AppModel: ObservableObject {
 
   func leave() {
     pingTimer?.invalidate()
+    PublicTunnel.shared.stop()
     if isHosting {
       host.stop()
       isHosting = false
@@ -210,8 +266,26 @@ final class AppModel: ObservableObject {
     peers = []
     items = []
     lanURLs = []
+    publicURL = nil
+    publicShareURL = nil
+    hostPort = 0
+    tunnelStatus = .idle
+    tunnelError = nil
     connection = .idle
     baseURL = nil
+  }
+
+  func copyHostLink() {
+    let link = bestShareURL ?? lanURLs.first
+    guard let link else { return }
+    UIPasteboard.general.string = link
+    toast = publicShareURL != nil ? "Public link copied" : "LAN link copied"
+  }
+
+  func copyPublicLink() {
+    guard let link = publicShareURL else { return }
+    UIPasteboard.general.string = link
+    toast = "Public link copied"
   }
 
   func sendDraft() {
@@ -306,12 +380,6 @@ final class AppModel: ObservableObject {
       guard let self, self.connection == .reconnecting else { return }
       self.client.connect(baseURL: baseURL, name: self.displayName, code: room.code, pin: self.joinPin)
     }
-  }
-
-  func copyHostLink() {
-    guard let first = lanURLs.first else { return }
-    UIPasteboard.general.string = first
-    toast = "LAN link copied"
   }
 
   func copyRoomCode() {
