@@ -355,6 +355,7 @@ struct RoomView: View {
   @State private var photoItem: PhotosPickerItem?
   @State private var showImporter = false
   @FocusState private var composerFocused: Bool
+  @State private var dropTargeted = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -379,9 +380,24 @@ struct RoomView: View {
       )
       composer
     }
+    .background(dropTargeted ? OCSTheme.accent.opacity(0.12) : Color.clear)
+    .onDrop(
+      of: [.fileURL, .image, .movie, .plainText, .data],
+      isTargeted: $dropTargeted
+    ) { providers in
+      model.handleDropProviders(providers)
+    }
     .keyboardDoneToolbar {
       composerFocused = false
       Keyboard.dismiss()
+    }
+    .sheet(isPresented: Binding(
+      get: { model.shareExportURL != nil },
+      set: { if !$0 { model.shareExportURL = nil } }
+    )) {
+      if let url = model.shareExportURL {
+        ActivityView(url: url)
+      }
     }
   }
 
@@ -454,9 +470,9 @@ struct RoomView: View {
         .foregroundStyle(OCSTheme.text)
         .focused($composerFocused)
 
-      HStack(spacing: 10) {
+      HStack(spacing: 8) {
         PhotosPicker(selection: $photoItem, matching: .any(of: [.images, .videos])) {
-          Label("Photos", systemImage: "photo.on.rectangle")
+          Label("Media", systemImage: "photo.on.rectangle")
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(SecondaryButtonStyle())
@@ -469,23 +485,33 @@ struct RoomView: View {
         }
         .buttonStyle(SecondaryButtonStyle())
 
-        Button("Send") {
-          composerFocused = false
-          Keyboard.dismiss()
-          model.sendDraft()
+        Button {
+          model.pasteClipboard()
+        } label: {
+          Label("Paste", systemImage: "doc.on.clipboard")
+            .frame(maxWidth: .infinity)
         }
-          .buttonStyle(PrimaryButtonStyle())
-          .frame(maxWidth: 110)
+        .buttonStyle(SecondaryButtonStyle())
       }
+
+      Button("Send") {
+        composerFocused = false
+        Keyboard.dismiss()
+        model.sendDraft()
+      }
+      .buttonStyle(PrimaryButtonStyle())
+
+      Text("Drop files / photos here (iPad), or use Media · Files · Paste")
+        .font(.caption2)
+        .foregroundStyle(OCSTheme.muted)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(16)
     .background(.ultraThinMaterial)
     .onChange(of: photoItem) { item in
       guard let item else { return }
       Task {
-        if let data = try? await item.loadTransferable(type: Data.self) {
-          model.sendImageData(data, name: "photo-\(Int(Date().timeIntervalSince1970)).jpg", mime: "image/jpeg")
-        }
+        await model.sendPhotosPickerItem(item)
         photoItem = nil
       }
     }
@@ -636,11 +662,12 @@ struct HostInfoCard: View {
 }
 
 struct ItemRow: View {
+  @EnvironmentObject private var model: AppModel
   let item: RoomItem
 
   var body: some View {
     GlassCard {
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: 10) {
         HStack {
           Text(item.fromName)
             .font(.caption.weight(.semibold))
@@ -656,13 +683,45 @@ struct ItemRow: View {
             .font(.body.monospaced())
             .foregroundStyle(OCSTheme.text)
             .textSelection(.enabled)
+            .draggable(t.text)
+          Button {
+            model.copyText(t.text)
+          } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryButtonStyle())
         case .file(let f):
-          Label(f.name, systemImage: "doc.fill")
+          Label(f.name, systemImage: iconName(for: f.mimeType))
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(OCSTheme.text)
-          Text(ByteCountFormatter.string(fromByteCount: f.size, countStyle: .file))
+          Text(ByteCountFormatter.string(fromByteCount: f.size, countStyle: .file) + " · " + f.mimeType)
             .font(.caption)
             .foregroundStyle(OCSTheme.muted)
+          if model.downloadBusyId == f.id {
+            ProgressView()
+              .tint(OCSTheme.accent)
+          } else {
+            HStack(spacing: 8) {
+              Button {
+                model.saveFileItem(f)
+              } label: {
+                Label(
+                  MediaSave.isImage(f.mimeType) || MediaSave.isVideo(f.mimeType) ? "Save" : "Download",
+                  systemImage: "arrow.down.circle"
+                )
+                .frame(maxWidth: .infinity)
+              }
+              .buttonStyle(SecondaryButtonStyle())
+              Button {
+                model.shareFileItem(f)
+              } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+                  .frame(maxWidth: .infinity)
+              }
+              .buttonStyle(SecondaryButtonStyle())
+            }
+          }
         }
       }
     }
@@ -672,7 +731,24 @@ struct ItemRow: View {
     let date = Date(timeIntervalSince1970: item.createdAt / 1000)
     return date.formatted(date: .omitted, time: .shortened)
   }
+
+  private func iconName(for mime: String) -> String {
+    if MediaSave.isImage(mime) { return "photo" }
+    if MediaSave.isVideo(mime) { return "video" }
+    return "doc.fill"
+  }
 }
+
+struct ActivityView: UIViewControllerRepresentable {
+  let url: URL
+
+  func makeUIViewController(context: Context) -> UIActivityViewController {
+    UIActivityViewController(activityItems: [url], applicationActivities: nil)
+  }
+
+  func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
 
 struct DebugLogView: View {
   @EnvironmentObject private var log: DebugLog

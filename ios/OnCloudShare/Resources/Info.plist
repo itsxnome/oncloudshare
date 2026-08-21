@@ -43,6 +43,8 @@
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach photos and videos to share with your PC.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save shared photos and videos from the room into your library.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

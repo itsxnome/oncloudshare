@@ -2,6 +2,8 @@ import Foundation
 import Combine
 import UniformTypeIdentifiers
 import UIKit
+import PhotosUI
+import CoreTransferable
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -51,6 +53,8 @@ final class AppModel: ObservableObject {
   @Published var draft: String = ""
   @Published var uploadProgress: Double = 0
   @Published var uploadLabel: String = ""
+  @Published var downloadBusyId: String?
+  @Published var shareExportURL: URL?
   @Published var toast: String?
   @Published var updateAvailable: AppReleaseAsset?
   @Published var updateBusy = false
@@ -371,6 +375,8 @@ final class AppModel: ObservableObject {
     shortShareURL = nil
     shortShareHint = nil
     shortLinkStatus = .idle
+    shareExportURL = nil
+    downloadBusyId = nil
     hostPort = 0
     tunnelBoundPort = 0
     autoTunnelStarted = false
@@ -447,6 +453,33 @@ final class AppModel: ObservableObject {
     }
   }
 
+  func sendPhotosPickerItem(_ item: PhotosPickerItem) async {
+    do {
+      if let movie = try await item.loadTransferable(type: VideoFileTransferable.self) {
+        let data = try Data(contentsOf: movie.url)
+        let name = movie.url.lastPathComponent
+        let mime = UTType(filenameExtension: movie.url.pathExtension)?.preferredMIMEType ?? "video/mp4"
+        try await upload(data: data, name: name, mime: mime)
+        try? FileManager.default.removeItem(at: movie.url)
+        return
+      }
+      if let data = try await item.loadTransferable(type: Data.self) {
+        let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+        let ext = mime.contains("png") ? "png" : (mime.contains("heic") ? "heic" : "jpg")
+        try await upload(
+          data: data,
+          name: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)",
+          mime: mime
+        )
+        return
+      }
+      toast = "Could not load media"
+    } catch {
+      toast = error.localizedDescription
+      ocsLog("Media send failed: \(error.localizedDescription)", level: .error)
+    }
+  }
+
   private func upload(data: Data, name: String, mime: String) async throws {
     guard room != nil else { throw URLError(.notConnectedToInternet) }
     if isHosting {
@@ -507,6 +540,162 @@ final class AppModel: ObservableObject {
     guard let code = room?.code else { return }
     UIPasteboard.general.string = code
     toast = "Code copied"
+  }
+
+  func copyText(_ text: String) {
+    UIPasteboard.general.string = text
+    toast = "Copied"
+  }
+
+  func pasteClipboard() {
+    let pb = UIPasteboard.general
+    if let image = pb.image, let data = image.jpegData(compressionQuality: 0.92) {
+      sendImageData(data, name: "clipboard-\(Int(Date().timeIntervalSince1970)).jpg", mime: "image/jpeg")
+      return
+    }
+    if let text = pb.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+      if isHosting {
+        host.hostSendText(text)
+      } else {
+        client.sendText(text)
+      }
+      toast = "Pasted text"
+      return
+    }
+    toast = "Clipboard is empty"
+  }
+
+  func saveFileItem(_ file: FileItem) {
+    Task { await saveFileItemAsync(file) }
+  }
+
+  func shareFileItem(_ file: FileItem) {
+    Task { await shareFileItemAsync(file) }
+  }
+
+  private func fetchFileData(_ file: FileItem) async throws -> (Data, String) {
+    if isHosting, let data = host.fileData(fileId: file.id) {
+      return (data, file.mimeType)
+    }
+    // Guest → PC host: HTTP /files works. Guest → iPhone host: prefer WS (HTTP often 502 on loca.lt).
+    if let httpData = try? await downloadViaHTTP(fileId: file.id), !httpData.isEmpty {
+      return (httpData, file.mimeType)
+    }
+    let (data, _, mime) = try await client.downloadFile(fileId: file.id)
+    return (data, mime.isEmpty ? file.mimeType : mime)
+  }
+
+  private func downloadViaHTTP(fileId: String) async throws -> Data {
+    guard let base = baseURL ?? (publicURL.flatMap { URL(string: $0) }),
+          let code = room?.code
+    else {
+      throw URLError(.badURL)
+    }
+    var comps = URLComponents(url: base.appendingPathComponent("files/\(fileId)"), resolvingAgainstBaseURL: false)!
+    var items = [URLQueryItem(name: "code", value: code)]
+    let pin = joinPin.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !pin.isEmpty { items.append(URLQueryItem(name: "pin", value: pin)) }
+    comps.queryItems = items
+    guard let url = comps.url else { throw URLError(.badURL) }
+    var req = URLRequest(url: url)
+    req.timeoutInterval = 45
+    req.setValue("true", forHTTPHeaderField: "Bypass-Tunnel-Reminder")
+    req.setValue("OnCloudShare-iOS/1.3.0", forHTTPHeaderField: "User-Agent")
+    let (data, response) = try await URLSession.shared.data(for: req)
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+      throw URLError(.badServerResponse)
+    }
+    return data
+  }
+
+  private func saveFileItemAsync(_ file: FileItem) async {
+    downloadBusyId = file.id
+    defer { downloadBusyId = nil }
+    do {
+      let (data, mime) = try await fetchFileData(file)
+      if MediaSave.isImage(mime) || MediaSave.isVideo(mime) {
+        try await MediaSave.saveToPhotos(data: data, mime: mime, suggestedName: file.name)
+        toast = MediaSave.isVideo(mime) ? "Video saved to Photos" : "Image saved to Photos"
+      } else {
+        let url = try MediaSave.writeToDocuments(data: data, name: file.name)
+        shareExportURL = url
+        toast = "Saved · \(file.name)"
+      }
+      ocsLog("Saved \(file.name) (\(data.count) bytes)")
+    } catch {
+      toast = error.localizedDescription
+      ocsLog("Save failed: \(error.localizedDescription)", level: .error)
+    }
+  }
+
+  private func shareFileItemAsync(_ file: FileItem) async {
+    downloadBusyId = file.id
+    defer { downloadBusyId = nil }
+    do {
+      let (data, _) = try await fetchFileData(file)
+      let url = try MediaSave.writeToDocuments(data: data, name: file.name)
+      shareExportURL = url
+      toast = "Ready to share"
+    } catch {
+      toast = error.localizedDescription
+      ocsLog("Share prepare failed: \(error.localizedDescription)", level: .error)
+    }
+  }
+
+  func handleDropProviders(_ providers: [NSItemProvider]) -> Bool {
+    var handled = false
+    for provider in providers {
+      if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+        handled = true
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+          let url: URL? = {
+            if let u = item as? URL { return u }
+            if let data = item as? Data, let s = String(data: data, encoding: .utf8) {
+              return URL(string: s)
+            }
+            return nil
+          }()
+          guard let url else { return }
+          Task { @MainActor in self.sendFile(url: url) }
+        }
+      } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+        handled = true
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+          guard let data else { return }
+          Task { @MainActor in
+            self.sendImageData(
+              data,
+              name: "drop-\(Int(Date().timeIntervalSince1970)).jpg",
+              mime: "image/jpeg"
+            )
+          }
+        }
+      } else if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+        handled = true
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
+          guard let url else { return }
+          let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent(url.lastPathComponent)
+          try? FileManager.default.removeItem(at: dest)
+          try? FileManager.default.copyItem(at: url, to: dest)
+          Task { @MainActor in self.sendFile(url: dest) }
+        }
+      } else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+        handled = true
+        provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, _ in
+          guard let text = item as? String, !text.isEmpty else { return }
+          Task { @MainActor in
+            if self.isHosting {
+              self.host.hostSendText(text)
+            } else {
+              self.client.sendText(text)
+            }
+            self.toast = "Dropped text"
+          }
+        }
+      }
+    }
+    return handled
   }
 
   func refreshUpdateCheck(userInitiated: Bool = false) async {

@@ -13,6 +13,19 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
   var onClose: (() -> Void)?
   var onPong: (() -> Void)?
 
+  private struct PendingDownload {
+    var name: String = "file"
+    var mime: String = "application/octet-stream"
+    var size: Int = 0
+    var totalChunks: Int = 0
+    var chunks: [Int: Data] = [:]
+    var continuation: CheckedContinuation<(Data, String, String), Error>?
+    var timeout: DispatchWorkItem?
+  }
+
+  private var pendingDownload: PendingDownload?
+  private let downloadLock = NSLock()
+
   override init() {
     if let saved = UserDefaults.standard.string(forKey: "ocs.peerId") {
       peerId = saved
@@ -40,7 +53,7 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
     // loca.lt interstitial bypass for public tunnels (browsers still see the page)
     req.setValue("true", forHTTPHeaderField: "Bypass-Tunnel-Reminder")
     req.setValue("bypass-tunnel-reminder", forHTTPHeaderField: "bypass-tunnel-reminder")
-    req.setValue("OnCloudShare-iOS/1.2.3", forHTTPHeaderField: "User-Agent")
+    req.setValue("OnCloudShare-iOS/1.3.0", forHTTPHeaderField: "User-Agent")
     req.timeoutInterval = 25
     let task = session.webSocketTask(with: req)
     self.task = task
@@ -74,6 +87,9 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
   func disconnect(sendLeave: Bool) {
     connectTimeout?.cancel()
     connectTimeout = nil
+    failPendingDownload(NSError(domain: "OnCloudShare", code: 3, userInfo: [
+      NSLocalizedDescriptionKey: "Disconnected",
+    ]))
     if sendLeave {
       sendJSON(["type": "leave"])
     }
@@ -129,6 +145,47 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
     }
   }
 
+  /// Request file bytes from host over WebSocket (`file-get` → `file-offer` + chunks).
+  func downloadFile(fileId: String) async throws -> (Data, String, String) {
+    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(Data, String, String), Error>) in
+      downloadLock.lock()
+      if pendingDownload != nil {
+        downloadLock.unlock()
+        cont.resume(throwing: NSError(domain: "OnCloudShare", code: 4, userInfo: [
+          NSLocalizedDescriptionKey: "Another download is in progress",
+        ]))
+        return
+      }
+      let timeout = DispatchWorkItem { [weak self] in
+        self?.failPendingDownload(NSError(domain: "OnCloudShare", code: 5, userInfo: [
+          NSLocalizedDescriptionKey: "Download timed out",
+        ]))
+      }
+      pendingDownload = PendingDownload(continuation: cont, timeout: timeout)
+      downloadLock.unlock()
+      DispatchQueue.global().asyncAfter(deadline: .now() + 90, execute: timeout)
+      sendJSON(["type": "file-get", "fileId": fileId])
+    }
+  }
+
+  private func failPendingDownload(_ error: Error) {
+    downloadLock.lock()
+    let pending = pendingDownload
+    pendingDownload = nil
+    downloadLock.unlock()
+    pending?.timeout?.cancel()
+    pending?.continuation?.resume(throwing: error)
+  }
+
+  private func completePendingDownload(data: Data, name: String, mime: String) {
+    downloadLock.lock()
+    let pending = pendingDownload
+    pendingDownload = nil
+    downloadLock.unlock()
+    pending?.timeout?.cancel()
+    pending?.continuation?.resume(returning: (data, name, mime))
+  }
+
   private func sendJSON(_ obj: [String: Any]) {
     guard let task, let data = try? JSONSerialization.data(withJSONObject: obj),
           let str = String(data: data, encoding: .utf8)
@@ -150,14 +207,25 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
         switch message {
         case .string(let text):
           self.handleText(text)
-        case .data:
-          break
+        case .data(let data):
+          self.handleBinary(data)
         @unknown default:
           break
         }
         self.listen()
       }
     }
+  }
+
+  private func handleBinary(_ data: Data) {
+    guard let decoded = OCSFCodec.decodeChunk(data) else { return }
+    downloadLock.lock()
+    guard pendingDownload != nil else {
+      downloadLock.unlock()
+      return
+    }
+    pendingDownload?.chunks[Int(decoded.index)] = decoded.payload
+    downloadLock.unlock()
   }
 
   private func handleText(_ text: String) {
@@ -191,12 +259,71 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
     case "peers":
       onPeers?(Self.parsePeers(json["peers"]))
     case "error":
-      onError?(json["message"] as? String ?? "Connection error")
+      let msg = json["message"] as? String ?? "Connection error"
+      downloadLock.lock()
+      let downloading = pendingDownload != nil
+      downloadLock.unlock()
+      if downloading {
+        failPendingDownload(NSError(domain: "OnCloudShare", code: 6, userInfo: [
+          NSLocalizedDescriptionKey: msg,
+        ]))
+      } else {
+        onError?(msg)
+      }
     case "pong":
       onPong?()
     case "room-closed":
       onError?("Host closed the room")
       onClose?()
+    case "file-offer":
+      downloadLock.lock()
+      guard pendingDownload != nil else {
+        downloadLock.unlock()
+        break
+      }
+      pendingDownload?.name = (json["name"] as? String) ?? "file"
+      pendingDownload?.mime = (json["mimeType"] as? String) ?? "application/octet-stream"
+      pendingDownload?.size = (json["size"] as? Int) ?? 0
+      pendingDownload?.totalChunks = (json["totalChunks"] as? Int) ?? 0
+      pendingDownload?.chunks = [:]
+      downloadLock.unlock()
+    case "file-offer-done":
+      downloadLock.lock()
+      guard var pending = pendingDownload else {
+        downloadLock.unlock()
+        break
+      }
+      let total = pending.totalChunks
+      var assembled = Data()
+      assembled.reserveCapacity(max(pending.size, 0))
+      var ok = total > 0
+      if total > 0 {
+        for i in 0..<total {
+          guard let chunk = pending.chunks[i] else {
+            ok = false
+            break
+          }
+          assembled.append(chunk)
+        }
+      } else if pending.size == 0 {
+        ok = true
+      } else {
+        ok = false
+      }
+      let name = pending.name
+      let mime = pending.mime
+      let cont = pending.continuation
+      pending.continuation = nil
+      pendingDownload = pending
+      downloadLock.unlock()
+      if ok {
+        completePendingDownload(data: assembled, name: name, mime: mime)
+      } else {
+        failPendingDownload(NSError(domain: "OnCloudShare", code: 7, userInfo: [
+          NSLocalizedDescriptionKey: "Incomplete file download",
+        ]))
+      }
+      _ = cont
     default:
       break
     }

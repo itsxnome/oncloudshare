@@ -25,6 +25,18 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.3.0",
+      date: "2026-08-21",
+      title: "Save, copy, paste & drop",
+      items: [
+        "Copy button on text items (and drag text on iPad)",
+        "Save images/videos to Photos · Download other files · Share sheet",
+        "Paste clipboard (text or image) into the room",
+        "Drop files / photos onto the room (iPad)",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.9",
       date: "2026-08-21",
       title: "Dismiss keyboard on tap outside",

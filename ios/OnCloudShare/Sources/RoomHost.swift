@@ -133,6 +133,16 @@ final class RoomHost {
     }
   }
 
+  /// Local file bytes for host-side Save / Share (no network).
+  func fileData(fileId: String) -> Data? {
+    workQueue.sync {
+      guard let stored = files[fileId] else { return nil }
+      if let d = stored.data { return d }
+      if let url = stored.fileURL { return try? Data(contentsOf: url) }
+      return nil
+    }
+  }
+
   // MARK: - Private
 
   private func startLocked(roomName: String, hostName: String, pin: String?, hostPeerId: String) {
