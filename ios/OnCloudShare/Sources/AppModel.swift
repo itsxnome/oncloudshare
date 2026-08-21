@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
   @Published var lanURLs: [String] = []
   @Published var publicURL: String?
   @Published var publicShareURL: String?
+  @Published var shortShareURL: String?
+  @Published var shortShareHint: String?
   @Published var tunnelStatus: TunnelUIStatus = .idle
   @Published var tunnelError: String?
   @Published var hostPort: UInt16 = 0
@@ -197,6 +199,8 @@ final class AppModel: ObservableObject {
     isHosting = true
     publicURL = nil
     publicShareURL = nil
+    shortShareURL = nil
+    shortShareHint = nil
     autoTunnelStarted = false
     tunnelBoundPort = 0
     hostNeedsAttention = false
@@ -237,6 +241,8 @@ final class AppModel: ObservableObject {
     guard isHosting, hostPort > 0, let code = room?.code else { return }
     tunnelStatus = .starting
     tunnelError = nil
+    shortShareURL = nil
+    shortShareHint = nil
     ocsLog("Starting public tunnel on port \(hostPort)")
     do {
       let url = try await PublicTunnel.shared.start(localPort: hostPort)
@@ -248,8 +254,17 @@ final class AppModel: ObservableObject {
       updated?.tunnelUrl = base
       room = updated
       tunnelStatus = .active
-      toast = "Public link ready"
       ocsLog("Public share URL \(publicShareURL ?? "")")
+      toast = "Public link ready — shortening…"
+      if let long = publicShareURL, let short = await ShortLinkService.shorten(long) {
+        shortShareURL = short
+        shortShareHint = ShortLinkService.typingHint(from: short)
+        toast = "Short link ready · \(shortShareHint ?? short)"
+        ocsLog("Short link \(short)")
+      } else {
+        toast = "Public link ready (shortener unavailable — use full link)"
+        ocsLog("Short link unavailable", level: .warn)
+      }
     } catch {
       tunnelStatus = .error
       tunnelError = error.localizedDescription
@@ -262,8 +277,9 @@ final class AppModel: ObservableObject {
     Task { await startPublicTunnel() }
   }
 
+  /// Prefer short public link for QR / WhatsApp; fall back to full tunnel or LAN.
   var bestShareURL: String? {
-    publicShareURL ?? lanURLs.first
+    shortShareURL ?? publicShareURL ?? lanURLs.first
   }
 
   func joinFromFields() {
@@ -328,6 +344,8 @@ final class AppModel: ObservableObject {
     lanURLs = []
     publicURL = nil
     publicShareURL = nil
+    shortShareURL = nil
+    shortShareHint = nil
     hostPort = 0
     tunnelBoundPort = 0
     autoTunnelStarted = false
@@ -342,13 +360,28 @@ final class AppModel: ObservableObject {
     let link = bestShareURL ?? lanURLs.first
     guard let link else { return }
     UIPasteboard.general.string = link
-    toast = publicShareURL != nil ? "Public link copied" : "LAN link copied"
+    if shortShareURL != nil {
+      toast = "Short link copied"
+    } else if publicShareURL != nil {
+      toast = "Public link copied"
+    } else {
+      toast = "LAN link copied"
+    }
+  }
+
+  func copyShortLink() {
+    guard let link = shortShareURL else {
+      copyHostLink()
+      return
+    }
+    UIPasteboard.general.string = link
+    toast = "Short link copied · \(shortShareHint ?? link)"
   }
 
   func copyPublicLink() {
     guard let link = publicShareURL else { return }
     UIPasteboard.general.string = link
-    toast = "Public link copied"
+    toast = "Full public link copied"
   }
 
   func sendDraft() {

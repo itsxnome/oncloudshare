@@ -519,14 +519,30 @@ struct HostInfoCard: View {
 
         if model.tunnelStatus == .active, let pub = model.publicShareURL {
           VStack(alignment: .leading, spacing: 6) {
-            Text("PUBLIC")
+            if let short = model.shortShareURL, let hint = model.shortShareHint {
+              Text("SHORT LINK")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(OCSTheme.online)
+              Text(hint)
+                .font(.title3.monospaced().weight(.bold))
+                .foregroundStyle(OCSTheme.accent)
+                .textSelection(.enabled)
+              Text(short)
+                .font(.caption.monospaced())
+                .foregroundStyle(OCSTheme.muted)
+                .textSelection(.enabled)
+              Text("Easy to type or send. Opens in any browser and jumps to your room.")
+                .font(.caption2)
+                .foregroundStyle(OCSTheme.muted)
+            }
+            Text("FULL LINK")
               .font(.caption2.weight(.semibold))
-              .foregroundStyle(OCSTheme.online)
+              .foregroundStyle(OCSTheme.muted)
             Text(pub)
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Guests open this link in Chrome and tap Download in the room. File downloads use the live connection (HTTP /files links often show Bad Gateway on free tunnels).")
+            Text("Guests open the short or full link in Chrome. Keep this app open while hosting.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }
@@ -562,8 +578,18 @@ struct HostInfoCard: View {
         }
 
         HStack(spacing: 10) {
-          Button("Copy link") { model.copyHostLink() }
-            .buttonStyle(SecondaryButtonStyle())
+          if model.shortShareURL != nil {
+            Button("Copy short") { model.copyShortLink() }
+              .buttonStyle(SecondaryButtonStyle())
+          }
+          Button(model.shortShareURL != nil ? "Copy full" : "Copy link") {
+            if model.shortShareURL != nil {
+              model.copyPublicLink()
+            } else {
+              model.copyHostLink()
+            }
+          }
+          .buttonStyle(SecondaryButtonStyle())
           Button("Copy code") { model.copyRoomCode() }
             .buttonStyle(SecondaryButtonStyle())
         }

@@ -25,6 +25,16 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.7",
+      date: "2026-08-21",
+      title: "Short share links",
+      items: [
+        "Auto short link (is.gd / v.gd) for public rooms — easier to type and send",
+        "Copy short / Copy full buttons + QR uses the short link when available",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.6",
       date: "2026-08-21",
       title: "QR toggle + fix public file downloads",
