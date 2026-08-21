@@ -25,6 +25,17 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.4",
+      date: "2026-08-21",
+      title: "Keep hosting alive in background",
+      items: [
+        "Fix DefunctConnection when switching to WhatsApp — silent keep-alive + auto-recover",
+        "Don't kill the room on background listener death",
+        "Avoid accidental double public-tunnel start",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.3",
       date: "2026-08-21",
       title: "Public join clarity",

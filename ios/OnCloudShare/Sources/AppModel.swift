@@ -15,6 +15,7 @@ final class AppModel: ObservableObject {
   @Published var hostPin: String = ""
   @Published var hostPublic = true
   @Published var isHosting = false
+  @Published var hostNeedsAttention = false
   @Published var lanURLs: [String] = []
   @Published var publicURL: String?
   @Published var publicShareURL: String?
@@ -29,6 +30,11 @@ final class AppModel: ObservableObject {
     case active
     case error
   }
+
+  /// Avoid starting a second public tunnel for the same room session.
+  private var autoTunnelStarted = false
+  private var tunnelBoundPort: UInt16 = 0
+
   @Published var room: RoomInfo?
   @Published var peers: [PeerInfo] = []
   @Published var items: [RoomItem] = []
@@ -124,24 +130,53 @@ final class AppModel: ObservableObject {
     }
     host.onError = { [weak self] message in
       Task { @MainActor in
+        HostKeepAlive.shared.stop()
         self?.connection = .failed(message)
         self?.toast = message
         self?.isHosting = false
+        self?.hostNeedsAttention = false
+      }
+    }
+    host.onListenerDefunct = { [weak self] message in
+      Task { @MainActor in
+        guard let self, self.isHosting else { return }
+        self.hostNeedsAttention = true
+        self.toast = "Room paused in background — reopen OnCloudShare to restore"
+        ocsLog("Listener defunct while hosting: \(message)", level: .warn)
+        // Recover immediately if we're already active; otherwise wait for foreground
+        if UIApplication.shared.applicationState == .active {
+          self.recoverHostAfterBackground()
+        }
       }
     }
     host.onRoomReady = { [weak self] room, ips, port in
       Task { @MainActor in
         guard let self else { return }
+        let previousPort = self.hostPort
         self.room = room
         self.isHosting = true
+        self.hostNeedsAttention = false
         self.connection = .connected
         self.hostPort = port
         self.lanURLs = ips.map { "http://\($0):\(port)?code=\(room.code)" }
-        self.toast = self.hostPublic ? "Room \(room.code) live — starting public link…" : "Room \(room.code) is live on Wi‑Fi"
-        ocsLog("Host ready · \(self.lanURLs.first ?? "")")
-        if self.hostPublic {
+        HostKeepAlive.shared.start()
+
+        let needTunnel = self.hostPublic && (
+          !self.autoTunnelStarted || (previousPort != 0 && previousPort != port)
+        )
+        if needTunnel {
+          if !self.autoTunnelStarted {
+            self.toast = "Room \(room.code) live — starting public link…"
+          } else {
+            self.toast = "Port changed — refreshing public link…"
+          }
+          self.autoTunnelStarted = true
+          self.tunnelBoundPort = port
           await self.startPublicTunnel()
+        } else if self.toast == nil {
+          self.toast = "Room \(room.code) is live"
         }
+        ocsLog("Host ready · \(self.lanURLs.first ?? "")")
       }
     }
     host.onPeers = { [weak self] peers in
@@ -162,6 +197,9 @@ final class AppModel: ObservableObject {
     isHosting = true
     publicURL = nil
     publicShareURL = nil
+    autoTunnelStarted = false
+    tunnelBoundPort = 0
+    hostNeedsAttention = false
     tunnelStatus = hostPublic ? .starting : .idle
     tunnelError = nil
     ocsLog("Create room requested · public=\(hostPublic)")
@@ -172,6 +210,27 @@ final class AppModel: ObservableObject {
       pin: hostPin,
       hostPeerId: client.peerId
     )
+  }
+
+  func handleAppBackground() {
+    guard isHosting else { return }
+    HostKeepAlive.shared.handleDidEnterBackground()
+    ocsLog("App backgrounded while hosting — keep-alive running", level: .warn)
+  }
+
+  func handleAppActive() {
+    HostKeepAlive.shared.handleDidBecomeActive()
+    guard isHosting else { return }
+    if hostNeedsAttention {
+      recoverHostAfterBackground()
+    }
+  }
+
+  func recoverHostAfterBackground() {
+    guard isHosting else { return }
+    ocsLog("Recovering host after returning to app…", level: .warn)
+    toast = "Restoring room…"
+    host.recoverListener()
   }
 
   func startPublicTunnel() async {
@@ -254,6 +313,7 @@ final class AppModel: ObservableObject {
 
   func leave() {
     pingTimer?.invalidate()
+    HostKeepAlive.shared.stop()
     PublicTunnel.shared.stop()
     if isHosting {
       host.stop()
@@ -269,6 +329,9 @@ final class AppModel: ObservableObject {
     publicURL = nil
     publicShareURL = nil
     hostPort = 0
+    tunnelBoundPort = 0
+    autoTunnelStarted = false
+    hostNeedsAttention = false
     tunnelStatus = .idle
     tunnelError = nil
     connection = .idle

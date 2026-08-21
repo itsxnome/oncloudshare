@@ -46,6 +46,12 @@ final class RoomHost {
   var onItems: (([RoomItem]) -> Void)?
   var onError: ((String) -> Void)?
   var onLog: ((String, LogLevel) -> Void)?
+  /// Fired when the TCP listener dies while a room is still intended (e.g. iOS background).
+  var onListenerDefunct: ((String) -> Void)?
+
+  private var intentionalStop = false
+  private var roomActive = false
+  private var recovering = false
 
   func setTunnelUrl(_ url: String?) {
     workQueue.async { [weak self] in
@@ -65,8 +71,17 @@ final class RoomHost {
     }
   }
 
+  /// Restart TCP + Bonjour after iOS killed the listener (same room code / items).
+  func recoverListener() {
+    workQueue.async { [weak self] in
+      self?.recoverListenerLocked()
+    }
+  }
+
   func stop() {
     workQueue.async { [weak self] in
+      self?.intentionalStop = true
+      self?.roomActive = false
       self?.stopLocked()
     }
   }
@@ -121,6 +136,7 @@ final class RoomHost {
   // MARK: - Private
 
   private func startLocked(roomName: String, hostName: String, pin: String?, hostPeerId: String) {
+    intentionalStop = false
     stopLocked()
     self.roomName = roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "iPhone Room" : roomName
     self.hostName = hostName.isEmpty ? "iPhone" : hostName
@@ -136,23 +152,52 @@ final class RoomHost {
     ]]
     self.items = []
     self.files = [:]
+    self.roomActive = true
+    bindListener(preferredPort: nil, emitReady: true)
+  }
 
+  private func recoverListenerLocked() {
+    guard roomActive, !intentionalStop else { return }
+    if recovering { return }
+    recovering = true
+    let keepPort = port
+    log("Recovering host listener (room \(roomCode))…", .warn)
+    for (_, peer) in connections { peer.close() }
+    connections.removeAll()
+    listener?.cancel()
+    listener = nil
+    bindListener(preferredPort: keepPort > 0 ? keepPort : nil, emitReady: true)
+    recovering = false
+  }
+
+  private func bindListener(preferredPort: UInt16?, emitReady: Bool) {
     let params = NWParameters.tcp
     params.allowLocalEndpointReuse = true
     params.includePeerToPeer = true
 
     do {
-      let listener = try NWListener(using: params, on: .any)
+      let portParam: NWEndpoint.Port = {
+        if let preferredPort, preferredPort > 0, let p = NWEndpoint.Port(rawValue: preferredPort) {
+          return p
+        }
+        return .any
+      }()
+      let listener: NWListener
+      do {
+        listener = try NWListener(using: params, on: portParam)
+      } catch {
+        // Preferred port busy — fall back
+        listener = try NWListener(using: params, on: .any)
+      }
       self.listener = listener
-      var txt = NWTXTRecord([
-        "code": roomCode,
-        "room": self.roomName,
-        "hostName": self.hostName,
-      ])
       listener.service = NWListener.Service(
         name: "OnCloudShare-\(roomCode)",
         type: "_oncloudshare._tcp",
-        txtRecord: txt
+        txtRecord: NWTXTRecord([
+          "code": roomCode,
+          "room": self.roomName,
+          "hostName": self.hostName,
+        ])
       )
       listener.stateUpdateHandler = { [weak self] state in
         guard let self else { return }
@@ -160,14 +205,30 @@ final class RoomHost {
           switch state {
           case .ready:
             let p = self.listener?.port?.rawValue ?? 0
+            let portChanged = self.port != 0 && self.port != p
             self.port = p
             self.log("Host listening on port \(p)", .info)
-            self.emitReady()
+            if emitReady || portChanged {
+              self.emitReady()
+            }
           case .failed(let err):
-            self.log("Listener failed: \(err)", .error)
-            self.onError?("Could not start room: \(err.localizedDescription)")
+            let msg = String(describing: err)
+            self.log("Listener failed: \(msg)", .error)
+            self.listener = nil
+            if self.intentionalStop || !self.roomActive || self.recovering {
+              return
+            }
+            // iOS often reports DefunctConnection after backgrounding
+            if msg.localizedCaseInsensitiveContains("Defunct") || msg.contains("-65569") {
+              self.onListenerDefunct?(msg)
+            } else {
+              self.onError?("Room listener failed: \(err.localizedDescription)")
+            }
           case .cancelled:
             self.log("Listener cancelled", .debug)
+            if !self.intentionalStop && self.roomActive && !self.recovering {
+              self.onListenerDefunct?("Listener cancelled")
+            }
           default:
             break
           }

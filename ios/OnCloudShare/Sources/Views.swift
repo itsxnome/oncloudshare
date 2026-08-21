@@ -6,6 +6,7 @@ struct RootView: View {
   @ObservedObject private var debugLog = DebugLog.shared
   @State private var showDebug = false
   @State private var showChangelog = false
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     ZStack {
@@ -44,6 +45,16 @@ struct RootView: View {
     }
     .sheet(isPresented: $showChangelog) {
       ChangelogView()
+    }
+    .onChange(of: scenePhase) { phase in
+      switch phase {
+      case .active:
+        model.handleAppActive()
+      case .background:
+        model.handleAppBackground()
+      default:
+        break
+      }
     }
   }
 }
@@ -126,9 +137,7 @@ struct HomeView: View {
             .buttonStyle(PrimaryButtonStyle())
             .disabled(model.connection == .connecting)
 
-            Text(model.hostPublic
-              ? "Public link + QR appear after the room starts. Keep the app open."
-              : "LAN only — turn on Public room for remote guests.")
+            Text("While hosting, keep OnCloudShare open (or return quickly after WhatsApp). iOS can pause the room in the background.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }
@@ -473,6 +482,12 @@ struct HostInfoCard: View {
           .font(.headline)
           .foregroundStyle(OCSTheme.text)
 
+        if model.hostNeedsAttention {
+          Text("Room was interrupted in the background — restoring. If the public link dies, tap New public link.")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
+
         if let share = model.bestShareURL {
           VStack(spacing: 8) {
             QRCodeView(string: share, size: 168)
@@ -501,7 +516,7 @@ struct HostInfoCard: View {
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Temporary free tunnel (loca.lt). Chrome shows a one-time warning — enter the IP and Continue, then join in the OnCloudShare app (not in the browser). Keep this app open.")
+            Text("Temporary free tunnel (loca.lt). Prefer sharing from the app. Keep OnCloudShare open — switching apps can pause the room; it should restore when you come back.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }
