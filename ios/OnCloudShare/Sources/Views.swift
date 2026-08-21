@@ -520,23 +520,35 @@ struct HostInfoCard: View {
         }
 
         if model.tunnelStatus == .active, let pub = model.publicShareURL {
-          VStack(alignment: .leading, spacing: 6) {
-            if let short = model.shortShareURL, let hint = model.shortShareHint {
-              Text("SHORT LINK")
-                .font(.caption2.weight(.semibold))
+          VStack(alignment: .leading, spacing: 8) {
+            if model.shortLinkStatus == .creating {
+              HStack(spacing: 8) {
+                ProgressView().tint(OCSTheme.accent)
+                Text("Creating short link…")
+                  .font(.caption)
+                  .foregroundStyle(OCSTheme.muted)
+              }
+            }
+
+            if let hint = model.shortShareHint, model.shortShareURL != nil {
+              Text("TYPE THIS IN CHROME")
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(OCSTheme.online)
               Text(hint)
-                .font(.title3.monospaced().weight(.bold))
+                .font(.title2.monospaced().weight(.bold))
                 .foregroundStyle(OCSTheme.accent)
                 .textSelection(.enabled)
-              Text(short)
-                .font(.caption.monospaced())
-                .foregroundStyle(OCSTheme.muted)
-                .textSelection(.enabled)
-              Text("Easy to type or send. Opens in any browser and jumps to your room.")
+              Text("Example: open Chrome → type \(hint) → Enter. It opens your room.")
                 .font(.caption2)
                 .foregroundStyle(OCSTheme.muted)
+            } else if model.shortLinkStatus == .failed {
+              Text("Short link unavailable")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(OCSTheme.danger)
+              Button("Retry short link") { model.retryShortLink() }
+                .buttonStyle(SecondaryButtonStyle())
             }
+
             Text("FULL LINK")
               .font(.caption2.weight(.semibold))
               .foregroundStyle(OCSTheme.muted)
@@ -544,7 +556,7 @@ struct HostInfoCard: View {
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Guests open the short or full link in Chrome. Keep this app open while hosting.")
+            Text("Keep this app open while hosting. Guests can use the short or full link.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }

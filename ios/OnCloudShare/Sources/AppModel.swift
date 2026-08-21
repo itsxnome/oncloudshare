@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
   @Published var publicShareURL: String?
   @Published var shortShareURL: String?
   @Published var shortShareHint: String?
+  @Published var shortLinkStatus: ShortLinkUIStatus = .idle
   @Published var tunnelStatus: TunnelUIStatus = .idle
   @Published var tunnelError: String?
   @Published var hostPort: UInt16 = 0
@@ -31,6 +32,13 @@ final class AppModel: ObservableObject {
     case starting
     case active
     case error
+  }
+
+  enum ShortLinkUIStatus: Equatable {
+    case idle
+    case creating
+    case ready
+    case failed
   }
 
   /// Avoid starting a second public tunnel for the same room session.
@@ -201,6 +209,7 @@ final class AppModel: ObservableObject {
     publicShareURL = nil
     shortShareURL = nil
     shortShareHint = nil
+    shortLinkStatus = .idle
     autoTunnelStarted = false
     tunnelBoundPort = 0
     hostNeedsAttention = false
@@ -243,6 +252,7 @@ final class AppModel: ObservableObject {
     tunnelError = nil
     shortShareURL = nil
     shortShareHint = nil
+    shortLinkStatus = .idle
     ocsLog("Starting public tunnel on port \(hostPort)")
     do {
       let url = try await PublicTunnel.shared.start(localPort: hostPort)
@@ -255,16 +265,7 @@ final class AppModel: ObservableObject {
       room = updated
       tunnelStatus = .active
       ocsLog("Public share URL \(publicShareURL ?? "")")
-      toast = "Public link ready — shortening…"
-      if let long = publicShareURL, let short = await ShortLinkService.shorten(long) {
-        shortShareURL = short
-        shortShareHint = ShortLinkService.typingHint(from: short)
-        toast = "Short link ready · \(shortShareHint ?? short)"
-        ocsLog("Short link \(short)")
-      } else {
-        toast = "Public link ready (shortener unavailable — use full link)"
-        ocsLog("Short link unavailable", level: .warn)
-      }
+      await refreshShortLink()
     } catch {
       tunnelStatus = .error
       tunnelError = error.localizedDescription
@@ -275,6 +276,29 @@ final class AppModel: ObservableObject {
 
   func regeneratePublicTunnel() {
     Task { await startPublicTunnel() }
+  }
+
+  func refreshShortLink() async {
+    guard let long = publicShareURL else { return }
+    shortLinkStatus = .creating
+    shortShareURL = nil
+    shortShareHint = nil
+    toast = "Creating short link…"
+    if let short = await ShortLinkService.shorten(long) {
+      shortShareURL = short
+      shortShareHint = ShortLinkService.typingHint(from: short)
+      shortLinkStatus = .ready
+      toast = "Type in Chrome: \(shortShareHint ?? short)"
+      ocsLog("Short link \(short)")
+    } else {
+      shortLinkStatus = .failed
+      toast = "Short link failed — tap Retry short link"
+      ocsLog("Short link unavailable", level: .warn)
+    }
+  }
+
+  func retryShortLink() {
+    Task { await refreshShortLink() }
   }
 
   /// Prefer short public link for QR / WhatsApp; fall back to full tunnel or LAN.
@@ -346,6 +370,7 @@ final class AppModel: ObservableObject {
     publicShareURL = nil
     shortShareURL = nil
     shortShareHint = nil
+    shortLinkStatus = .idle
     hostPort = 0
     tunnelBoundPort = 0
     autoTunnelStarted = false

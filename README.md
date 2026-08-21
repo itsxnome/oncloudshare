@@ -6,7 +6,7 @@ Local-first desktop app for sharing **text**, **clipboard** (text & images), and
 - Different networks → Cloudflare tunnel (or a pasted ngrok URL)
 - No Discord, WhatsApp, or cloud drive required
 
-**Current version:** [`1.2.7`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.2.7) (Electron + React · iOS AltStore)
+**Current version:** [`1.2.8`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.2.8) (Electron + React · iOS AltStore)
 
 ---
 
@@ -18,15 +18,20 @@ Official builds are published on **[GitHub Releases](https://github.com/itsxnome
 | --- | --- |
 | [`OnCloudShare 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing (Windows unchanged since 1.2.0) |
 | [`OnCloudShare Setup 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | NSIS installer (supports auto-update + Start with Windows) |
-| `OnCloudShare-1.2.7.ipa` | iOS app for **AltStore** |
+| `OnCloudShare-1.2.8.ipa` | iOS app for **AltStore** |
 
 > Only releases **authorized by the project owner** are published here. Prefer downloading from GitHub Releases, not random mirrors.
 
 ---
 
+## What’s new in 1.2.8
+
+- Short links via **TinyURL** (is.gd was blocked on many networks, so short links never appeared)
+- Big **TYPE THIS IN CHROME** label on the host screen + Retry if shortening fails
+
 ## What’s new in 1.2.7
 
-- **Short share links** (is.gd / v.gd) for public rooms — easier to type and send on WhatsApp
+- Short share links for public rooms
 - Copy short / Copy full; QR prefers the short link
 
 ## What’s new in 1.2.6

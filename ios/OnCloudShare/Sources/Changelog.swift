@@ -25,6 +25,17 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.8",
+      date: "2026-08-21",
+      title: "Short links that actually work",
+      items: [
+        "Short links via TinyURL (is.gd was blocked on many networks)",
+        "Big “TYPE THIS IN CHROME” label + Retry if shortening fails",
+        "Fixed encoding so ?code= room links shorten correctly",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.7",
       date: "2026-08-21",
       title: "Short share links",
