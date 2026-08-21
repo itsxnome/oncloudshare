@@ -473,9 +473,53 @@ final class RoomHost {
       }
     case "leave":
       peer.close()
+    case "file-get":
+      guard peer.joined else {
+        peer.sendJSON(["type": "error", "message": "Join the room first."])
+        return
+      }
+      guard let fileId = json["fileId"] as? String else { return }
+      sendFileOverWebSocket(fileId: fileId, peer: peer)
     default:
       break
     }
+  }
+
+  private func sendFileOverWebSocket(fileId: String, peer: PeerConnection) {
+    guard let stored = files[fileId] else {
+      peer.sendJSON(["type": "error", "message": "File not found"])
+      return
+    }
+    let data: Data
+    if let d = stored.data {
+      data = d
+    } else if let url = stored.fileURL, let d = try? Data(contentsOf: url) {
+      data = d
+    } else {
+      peer.sendJSON(["type": "error", "message": "File data unavailable"])
+      return
+    }
+    let name = (stored.item["name"] as? String) ?? "file"
+    let mime = (stored.item["mimeType"] as? String) ?? "application/octet-stream"
+    let chunkSize = 256 * 1024
+    let totalChunks = max(1, Int(ceil(Double(data.count) / Double(chunkSize))))
+    peer.sendJSON([
+      "type": "file-offer",
+      "fileId": fileId,
+      "name": name,
+      "mimeType": mime,
+      "size": data.count,
+      "totalChunks": totalChunks,
+      "chunkSize": chunkSize,
+    ])
+    for i in 0..<totalChunks {
+      let start = i * chunkSize
+      let end = min(data.count, start + chunkSize)
+      let slice = data.subdata(in: start..<end)
+      peer.sendBinary(OCSFCodec.encodeChunk(fileId: fileId, index: UInt32(i), payload: slice))
+    }
+    peer.sendJSON(["type": "file-offer-done", "fileId": fileId])
+    log("Sent \(name) to \(peer.name) over WebSocket (\(data.count) bytes)", .info)
   }
 
   fileprivate func handleWSBinary(_ data: Data, peer: PeerConnection) {
@@ -793,6 +837,11 @@ private final class PeerConnection: Equatable {
           let str = String(data: data, encoding: .utf8)
     else { return }
     let frame = WebSocketCodec.encodeText(str)
+    connection.send(content: frame, contentContext: .defaultMessage, isComplete: false, completion: .contentProcessed { _ in })
+  }
+
+  func sendBinary(_ data: Data) {
+    let frame = WebSocketCodec.encodeBinary(data)
     connection.send(content: frame, contentContext: .defaultMessage, isComplete: false, completion: .contentProcessed { _ in })
   }
 

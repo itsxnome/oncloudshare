@@ -117,6 +117,21 @@ enum WebSocketCodec {
 enum OCSFCodec {
   static let magic: [UInt8] = [0x4F, 0x43, 0x53, 0x46]
 
+  static func encodeChunk(fileId: String, index: UInt32, payload: Data) -> Data {
+    let idData = Data(fileId.utf8)
+    var frame = Data()
+    frame.append(contentsOf: magic)
+    frame.append(1) // version
+    frame.append(1) // type chunk
+    frame.append(UInt8(idData.count))
+    frame.append(0)
+    frame.append(idData)
+    var idx = index.bigEndian
+    withUnsafeBytes(of: &idx) { frame.append(contentsOf: $0) }
+    frame.append(payload)
+    return frame
+  }
+
   static func decodeChunk(_ data: Data) -> (fileId: String, index: UInt32, payload: Data)? {
     guard data.count >= 12 else { return nil }
     guard Array(data.prefix(4)) == magic else { return nil }

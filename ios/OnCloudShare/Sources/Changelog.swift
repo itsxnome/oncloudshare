@@ -25,6 +25,17 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.6",
+      date: "2026-08-21",
+      title: "QR toggle + fix public file downloads",
+      items: [
+        "Show / Hide QR on the host screen",
+        "Browser downloads files over WebSocket (avoids loca.lt Bad Gateway on /files)",
+        "More public-tunnel bridges for HTTP fallbacks",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.5",
       date: "2026-08-21",
       title: "Browser join for iPhone-hosted rooms",

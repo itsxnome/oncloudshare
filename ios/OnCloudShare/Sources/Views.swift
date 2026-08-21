@@ -474,6 +474,7 @@ struct RoomView: View {
 
 struct HostInfoCard: View {
   @EnvironmentObject private var model: AppModel
+  @AppStorage("ocs.showQR") private var showQR = true
 
   var body: some View {
     GlassCard {
@@ -489,13 +490,22 @@ struct HostInfoCard: View {
         }
 
         if let share = model.bestShareURL {
-          VStack(spacing: 8) {
-            QRCodeView(string: share, size: 168)
+          HStack {
             Text(model.publicShareURL != nil ? "Scan to join (public)" : "Scan to join (LAN)")
               .font(.caption)
               .foregroundStyle(OCSTheme.muted)
+            Spacer()
+            Button(showQR ? "Hide QR" : "Show QR") {
+              withAnimation(.easeInOut(duration: 0.2)) { showQR.toggle() }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(OCSTheme.accent)
           }
-          .frame(maxWidth: .infinity)
+          if showQR {
+            QRCodeView(string: share, size: 168)
+              .frame(maxWidth: .infinity)
+              .transition(.opacity.combined(with: .scale(scale: 0.96)))
+          }
         }
 
         if model.tunnelStatus == .starting {
@@ -516,7 +526,7 @@ struct HostInfoCard: View {
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Guests can open this link in Chrome (PC or phone) and join in the browser — or use the OnCloudShare app. Keep this app open while hosting.")
+            Text("Guests open this link in Chrome and tap Download in the room. File downloads use the live connection (HTTP /files links often show Bad Gateway on free tunnels).")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }

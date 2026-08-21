@@ -504,6 +504,7 @@
         pingTimer: null,
         connectPromise: null,
         fileStatuses: new Map(),
+        downloads: new Map(),
       }
 
       const $ = (id) => document.getElementById(id)
@@ -609,9 +610,13 @@
               escapeHtml(item.name) +
               '</div><div class="hint">' +
               formatBytes(item.size) +
-              '</div><a class="btn btn-secondary" style="margin-top:10px;text-decoration:none" href="' +
-              fileUrl(item.id) +
-              '">Download</a></article>'
+              '</div><button type="button" class="btn btn-secondary" style="margin-top:10px" data-dl="' +
+              escapeHtml(item.id) +
+              '" data-name="' +
+              escapeHtml(item.name) +
+              '" data-mime="' +
+              escapeHtml(item.mimeType || 'application/octet-stream') +
+              '">Download</button></article>'
             )
           })
           .join('')
@@ -626,6 +631,28 @@
             } catch {
               showError('Could not copy')
             }
+          })
+        })
+        feed.querySelectorAll('[data-dl]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-dl')
+            const name = btn.getAttribute('data-name') || 'file'
+            const mime = btn.getAttribute('data-mime') || 'application/octet-stream'
+            btn.disabled = true
+            btn.textContent = 'Downloading…'
+            downloadFile(id, name, mime)
+              .then(() => {
+                btn.textContent = 'Saved'
+                setTimeout(() => {
+                  btn.disabled = false
+                  btn.textContent = 'Download'
+                }, 1500)
+              })
+              .catch((e) => {
+                showError((e && e.message) || 'Download failed')
+                btn.disabled = false
+                btn.textContent = 'Download'
+              })
           })
         })
       }
@@ -778,6 +805,7 @@
         state.connectPromise = new Promise((resolve, reject) => {
           clearTimeout(state.reconnectTimer)
           const ws = new WebSocket(wsUrl())
+          ws.binaryType = 'arraybuffer'
           state.ws = ws
           let settled = false
 
@@ -803,6 +831,10 @@
           }
 
           ws.onmessage = (ev) => {
+            if (ev.data instanceof ArrayBuffer) {
+              handleBinaryDownload(ev.data)
+              return
+            }
             let msg
             try {
               msg = JSON.parse(ev.data)
@@ -811,7 +843,11 @@
             }
             if (msg.type === 'error') {
               if (!settled) fail(msg.message)
-              else showError(msg.message || 'Transfer error')
+              else {
+                const pending = [...state.downloads.values()].find((d) => d.reject)
+                if (pending) pending.reject(new Error(msg.message || 'Transfer error'))
+                else showError(msg.message || 'Transfer error')
+              }
               return
             }
             if (msg.type === 'welcome') {
@@ -844,6 +880,18 @@
               const resolveStatus = state.fileStatuses.get(msg.fileId)
               state.fileStatuses.delete(msg.fileId)
               if (resolveStatus) resolveStatus(msg.nextIndex || 0)
+              return
+            }
+            if (msg.type === 'file-offer') {
+              const dl = state.downloads.get(msg.fileId)
+              if (dl) {
+                dl.meta = msg
+                dl.chunks = new Map()
+              }
+              return
+            }
+            if (msg.type === 'file-offer-done') {
+              finishDownload(msg.fileId)
               return
             }
             if (msg.type === 'room-closed') {
@@ -1173,6 +1221,109 @@
         new DataView(frame.buffer).setUint32(8 + id.length, index, false)
         frame.set(new Uint8Array(payload), 12 + id.length)
         return frame.buffer
+      }
+
+      function decodeChunkFrame(buf) {
+        const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+        if (u8.length < 12) return null
+        if (u8[0] !== 79 || u8[1] !== 67 || u8[2] !== 83 || u8[3] !== 70) return null
+        if (u8[4] !== 1 || u8[5] !== 1) return null
+        const idLen = u8[6]
+        const idStart = 8
+        const idEnd = idStart + idLen
+        if (u8.length < idEnd + 4) return null
+        const fileId = new TextDecoder().decode(u8.subarray(idStart, idEnd))
+        const index = new DataView(u8.buffer, u8.byteOffset + idEnd, 4).getUint32(0, false)
+        const payload = u8.subarray(idEnd + 4)
+        return { fileId, index, payload }
+      }
+
+      function handleBinaryDownload(buf) {
+        const decoded = decodeChunkFrame(buf)
+        if (!decoded) return
+        const dl = state.downloads.get(decoded.fileId)
+        if (!dl || !dl.chunks) return
+        dl.chunks.set(decoded.index, decoded.payload)
+      }
+
+      function finishDownload(fileId) {
+        const dl = state.downloads.get(fileId)
+        if (!dl) return
+        const meta = dl.meta || {}
+        const total = meta.totalChunks || dl.chunks.size
+        const parts = []
+        for (let i = 0; i < total; i++) {
+          const part = dl.chunks.get(i)
+          if (!part) {
+            dl.reject(new Error('Incomplete file download'))
+            state.downloads.delete(fileId)
+            return
+          }
+          parts.push(part)
+        }
+        const blob = new Blob(parts, { type: meta.mimeType || 'application/octet-stream' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = meta.name || 'file'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 2000)
+        dl.resolve()
+        state.downloads.delete(fileId)
+        showToast('Downloaded ' + (meta.name || 'file'))
+      }
+
+      async function downloadViaSocket(fileId, name, mime) {
+        if (!state.ws || state.ws.readyState !== 1) throw new Error('Not connected')
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            state.downloads.delete(fileId)
+            reject(new Error('Download timed out'))
+          }, 120000)
+          state.downloads.set(fileId, {
+            chunks: new Map(),
+            meta: { fileId, name, mimeType: mime },
+            resolve: () => {
+              clearTimeout(timer)
+              resolve()
+            },
+            reject: (err) => {
+              clearTimeout(timer)
+              state.downloads.delete(fileId)
+              reject(err)
+            },
+          })
+          state.ws.send(JSON.stringify({ type: 'file-get', fileId }))
+        })
+      }
+
+      async function downloadFile(id, name, mime) {
+        try {
+          await downloadViaSocket(id, name, mime)
+        } catch (e) {
+          // Fallback: HTTP (works on LAN; often 502 on free public tunnels)
+          const res = await fetch(fileUrl(id))
+          if (!res.ok) {
+            throw new Error(
+              (e && e.message ? e.message + ' · ' : '') +
+                'HTTP download failed (' +
+                res.status +
+                '). Stay connected and try Download again.',
+            )
+          }
+          const blob = await res.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = name || 'file'
+          document.body.appendChild(a)
+          a.click()
+          a.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          showToast('Downloaded ' + (name || 'file'))
+        }
       }
 
       function guessName(file, mime, stamp) {
