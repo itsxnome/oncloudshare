@@ -21,6 +21,7 @@ struct RootView: View {
         }
       }
     }
+    .dismissKeyboardOnTap()
     .overlay(alignment: .top) {
       if let toast = model.toast {
         Text(toast)
@@ -195,6 +196,11 @@ struct HomeView: View {
       }
       .padding(20)
     }
+    .scrollDismissesKeyboard(.interactively)
+    .keyboardDoneToolbar {
+      focused = nil
+      Keyboard.dismiss()
+    }
   }
 
   private var statusLine: some View {
@@ -348,6 +354,7 @@ struct RoomView: View {
   @Binding var showChangelog: Bool
   @State private var photoItem: PhotosPickerItem?
   @State private var showImporter = false
+  @FocusState private var composerFocused: Bool
 
   var body: some View {
     VStack(spacing: 0) {
@@ -363,7 +370,18 @@ struct RoomView: View {
         }
         .padding(16)
       }
+      .scrollDismissesKeyboard(.interactively)
+      .simultaneousGesture(
+        TapGesture().onEnded {
+          composerFocused = false
+          Keyboard.dismiss()
+        }
+      )
       composer
+    }
+    .keyboardDoneToolbar {
+      composerFocused = false
+      Keyboard.dismiss()
     }
   }
 
@@ -434,6 +452,7 @@ struct RoomView: View {
         .padding(12)
         .background(OCSTheme.surface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .foregroundStyle(OCSTheme.text)
+        .focused($composerFocused)
 
       HStack(spacing: 10) {
         PhotosPicker(selection: $photoItem, matching: .any(of: [.images, .videos])) {
@@ -450,7 +469,11 @@ struct RoomView: View {
         }
         .buttonStyle(SecondaryButtonStyle())
 
-        Button("Send") { model.sendDraft() }
+        Button("Send") {
+          composerFocused = false
+          Keyboard.dismiss()
+          model.sendDraft()
+        }
           .buttonStyle(PrimaryButtonStyle())
           .frame(maxWidth: 110)
       }

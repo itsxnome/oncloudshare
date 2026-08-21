@@ -25,6 +25,16 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.9",
+      date: "2026-08-21",
+      title: "Dismiss keyboard on tap outside",
+      items: [
+        "Tap outside a text field (or scroll) to close the keyboard",
+        "Keyboard Done button for PIN / number fields",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.8",
       date: "2026-08-21",
       title: "Short links that actually work",

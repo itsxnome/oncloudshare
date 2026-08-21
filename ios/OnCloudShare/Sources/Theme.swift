@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum OCSTheme {
   static let bg = Color(red: 0.04, green: 0.04, blue: 0.05)
@@ -63,5 +64,37 @@ struct SecondaryButtonStyle: ButtonStyle {
           )
       )
       .opacity(configuration.isPressed ? 0.85 : 1)
+  }
+}
+
+enum Keyboard {
+  static func dismiss() {
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder),
+      to: nil,
+      from: nil,
+      for: nil
+    )
+  }
+}
+
+extension View {
+  /// Tap empty area / chrome to close the software keyboard without blocking buttons.
+  func dismissKeyboardOnTap() -> some View {
+    simultaneousGesture(
+      TapGesture().onEnded {
+        Keyboard.dismiss()
+      }
+    )
+  }
+
+  func keyboardDoneToolbar(action: @escaping () -> Void = { Keyboard.dismiss() }) -> some View {
+    toolbar {
+      ToolbarItemGroup(placement: .keyboard) {
+        Spacer()
+        Button("Done") { action() }
+          .fontWeight(.semibold)
+      }
+    }
   }
 }
