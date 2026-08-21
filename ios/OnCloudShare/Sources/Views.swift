@@ -501,7 +501,7 @@ struct HostInfoCard: View {
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Temporary free tunnel · keep this app open. First browser visit may show a brief reminder page — tap continue.")
+            Text("Temporary free tunnel (loca.lt). Chrome shows a one-time warning — enter the IP and Continue, then join in the OnCloudShare app (not in the browser). Keep this app open.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }

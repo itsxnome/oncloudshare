@@ -25,6 +25,17 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.3",
+      date: "2026-08-21",
+      title: "Public join clarity",
+      items: [
+        "Landing page after loca.lt Continue (Chrome can't live-join alone)",
+        "Join timeout instead of endless Connecting…",
+        "Stronger public tunnel bridges + clearer host tips",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.2",
       date: "2026-08-21",
       title: "Public rooms + QR on iPhone",

@@ -24,6 +24,8 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
     session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
   }
 
+  private var connectTimeout: DispatchWorkItem?
+
   func connect(baseURL: URL, name: String, code: String, pin: String?) {
     disconnect(sendLeave: false)
     var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
@@ -35,13 +37,27 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
       return
     }
     var req = URLRequest(url: wsURL)
-    // loca.lt interstitial bypass for public tunnels
+    // loca.lt interstitial bypass for public tunnels (browsers still see the page)
     req.setValue("true", forHTTPHeaderField: "Bypass-Tunnel-Reminder")
-    req.setValue("OnCloudShare-iOS", forHTTPHeaderField: "User-Agent")
+    req.setValue("bypass-tunnel-reminder", forHTTPHeaderField: "bypass-tunnel-reminder")
+    req.setValue("OnCloudShare-iOS/1.2.3", forHTTPHeaderField: "User-Agent")
+    req.timeoutInterval = 25
     let task = session.webSocketTask(with: req)
     self.task = task
     task.resume()
     listen()
+
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self, self.task != nil else { return }
+      self.onError?(
+        "Join timed out. Free public tunnels are often slow — tap Join again, or use the LAN link on the same Wi‑Fi."
+      )
+      self.disconnect(sendLeave: false)
+      self.onClose?()
+    }
+    connectTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 22, execute: timeout)
+
     var join: [String: Any] = [
       "type": "join",
       "peerId": peerId,
@@ -49,10 +65,15 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
       "code": code.uppercased(),
     ]
     if let pin, !pin.isEmpty { join["pin"] = pin }
-    sendJSON(join)
+    // Small delay so the WS handshake can finish before the first frame
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+      self?.sendJSON(join)
+    }
   }
 
   func disconnect(sendLeave: Bool) {
+    connectTimeout?.cancel()
+    connectTimeout = nil
     if sendLeave {
       sendJSON(["type": "leave"])
     }
@@ -147,6 +168,8 @@ final class ShareClient: NSObject, URLSessionWebSocketDelegate {
 
     switch type {
     case "welcome":
+      connectTimeout?.cancel()
+      connectTimeout = nil
       let roomDict = json["room"] as? [String: Any] ?? [:]
       let room = RoomInfo(
         code: roomDict["code"] as? String ?? "",

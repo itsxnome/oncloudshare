@@ -230,15 +230,27 @@ final class RoomHost {
       return
     }
     if path == "/room" {
+      var payload: [String: Any] = [
+        "code": roomCode,
+        "name": roomName,
+        "hostName": hostName,
+        "hasPin": pin != nil,
+        "port": Int(port),
+      ]
+      if let tunnelUrl { payload["tunnelUrl"] = tunnelUrl }
+      peer.sendHTTP(status: 200, body: jsonString(payload))
+      return
+    }
+    if path == "/" || path == "/m" || path.hasPrefix("/m") {
       peer.sendHTTP(
         status: 200,
-        body: jsonString([
-          "code": roomCode,
-          "name": roomName,
-          "hostName": hostName,
-          "hasPin": pin != nil,
-          "port": Int(port),
-        ])
+        headers: ["Content-Type": "text/html; charset=utf-8"],
+        body: Self.landingHTML(
+          roomName: roomName,
+          code: roomCode,
+          hostName: hostName,
+          queryCode: request.query["code"]
+        )
       )
       return
     }
@@ -247,6 +259,45 @@ final class RoomHost {
       return
     }
     peer.sendHTTP(status: 404, body: "{\"error\":\"Not found\"}")
+  }
+
+  private static func landingHTML(roomName: String, code: String, hostName: String, queryCode: String?) -> String {
+    let shown = (queryCode?.uppercased()).flatMap { $0.isEmpty ? nil : $0 } ?? code
+    let esc: (String) -> String = { s in
+      s.replacingOccurrences(of: "&", with: "&amp;")
+        .replacingOccurrences(of: "<", with: "&lt;")
+        .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+    return """
+    <!doctype html>
+    <html lang="en"><head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>OnCloudShare · \(esc(shown))</title>
+    <style>
+      body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0b;color:#e4e4e7;margin:0;padding:24px;line-height:1.45}
+      .card{max-width:420px;margin:40px auto;padding:22px;border:1px solid #2a2a2e;border-radius:16px;background:#141416}
+      h1{font-size:1.35rem;margin:0 0 8px}
+      .code{font-family:ui-monospace,monospace;font-size:1.6rem;letter-spacing:.18em;color:#3b82f6;margin:14px 0}
+      .muted{color:#8b8b93;font-size:.92rem}
+      .warn{margin-top:16px;padding:12px;border-radius:12px;background:#1c1408;border:1px solid #5c3d0a;color:#fbbf24;font-size:.85rem}
+      ol{padding-left:1.2rem;margin:10px 0 0}
+      li{margin:6px 0}
+    </style></head><body>
+    <div class="card">
+      <h1>\(esc(roomName))</h1>
+      <p class="muted">Hosted by \(esc(hostName)) · OnCloudShare</p>
+      <div class="code">\(esc(shown))</div>
+      <p class="muted">Chrome cannot join the live room by itself. Use the OnCloudShare app (phone or PC).</p>
+      <ol class="muted">
+        <li>Open <strong>OnCloudShare</strong></li>
+        <li>Paste this page’s URL into <strong>Share link</strong></li>
+        <li>Room code should fill in automatically — tap <strong>Join room</strong></li>
+      </ol>
+      <div class="warn">If you saw a localtunnel warning first: enter the IP once, tap Continue, then use the app. That page is from the free public tunnel — not OnCloudShare.</div>
+    </div>
+    </body></html>
+    """
   }
 
   private func serveFile(path: String, query: [String: String], peer: PeerConnection) {

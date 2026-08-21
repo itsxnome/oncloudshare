@@ -41,7 +41,7 @@ final class PublicTunnel {
       self.localPort = localPort
       self.info = info
       self.running = true
-      let n = max(1, info.maxConn)
+      let n = max(4, info.maxConn)
       for _ in 0..<n {
         self.spawnBridgeLocked()
       }
