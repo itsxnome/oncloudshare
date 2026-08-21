@@ -25,6 +25,16 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.3.2",
+      date: "2026-08-21",
+      title: "Hide hosting panel",
+      items: [
+        "Hide / Show the “You’re hosting” card to free space for messages",
+        "Also available from the ••• menu",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.3.1",
       date: "2026-08-21",
       title: "Fix IPA build / updates",

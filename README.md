@@ -6,7 +6,7 @@ Local-first desktop app for sharing **text**, **clipboard** (text & images), and
 - Different networks → Cloudflare tunnel (or a pasted ngrok URL)
 - No Discord, WhatsApp, or cloud drive required
 
-**Current version:** [`1.3.1`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.3.1) (Electron + React · iOS AltStore)
+**Current version:** [`1.3.2`](https://github.com/itsxnome/oncloudshare/releases/tag/v1.3.2) (Electron + React · iOS AltStore)
 
 ---
 
@@ -18,11 +18,15 @@ Official builds are published on **[GitHub Releases](https://github.com/itsxnome
 | --- | --- |
 | [`OnCloudShare 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | Portable — run without installing (Windows unchanged since 1.2.0) |
 | [`OnCloudShare Setup 1.2.0.exe`](https://github.com/itsxnome/oncloudshare/releases/latest) | NSIS installer (supports auto-update + Start with Windows) |
-| `OnCloudShare-1.3.1.ipa` | iOS app for **AltStore** |
+| `OnCloudShare-1.3.2.ipa` | iOS app for **AltStore** |
 
 > Only releases **authorized by the project owner** are published here. Prefer downloading from GitHub Releases, not random mirrors.
 
 ---
+
+## What’s new in 1.3.2
+
+- Hide / Show the **You’re hosting** panel (more room for messages)
 
 ## What’s new in 1.3.1
 

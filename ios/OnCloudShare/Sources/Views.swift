@@ -356,6 +356,7 @@ struct RoomView: View {
   @State private var showImporter = false
   @FocusState private var composerFocused: Bool
   @State private var dropTargeted = false
+  @AppStorage("ocs.showHostInfo") private var showHostInfo = true
 
   var body: some View {
     VStack(spacing: 0) {
@@ -363,7 +364,33 @@ struct RoomView: View {
       ScrollView {
         LazyVStack(spacing: 12) {
           if model.isHosting {
-            HostInfoCard()
+            if showHostInfo {
+              HostInfoCard(showHostInfo: $showHostInfo)
+            } else {
+              Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showHostInfo = true }
+              } label: {
+                HStack {
+                  Label("Hosting details hidden", systemImage: "eye.slash")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(OCSTheme.muted)
+                  Spacer()
+                  Text("Show")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(OCSTheme.accent)
+                }
+                .padding(14)
+                .background(
+                  RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(OCSTheme.surface.opacity(0.92))
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(OCSTheme.border.opacity(0.8), lineWidth: 1)
+                    )
+                )
+              }
+              .buttonStyle(.plain)
+            }
           }
           ForEach(model.items) { item in
             ItemRow(item: item)
@@ -416,6 +443,9 @@ struct RoomView: View {
         Menu {
           Button("Copy room code") { model.copyRoomCode() }
           if model.isHosting {
+            Button(showHostInfo ? "Hide hosting details" : "Show hosting details") {
+              withAnimation(.easeInOut(duration: 0.2)) { showHostInfo.toggle() }
+            }
             Button(model.shortShareURL != nil ? "Copy short link" : "Copy share link") {
               model.copyShortLink()
             }
@@ -541,14 +571,23 @@ struct RoomView: View {
 
 struct HostInfoCard: View {
   @EnvironmentObject private var model: AppModel
+  @Binding var showHostInfo: Bool
   @AppStorage("ocs.showQR") private var showQR = true
 
   var body: some View {
     GlassCard {
       VStack(alignment: .leading, spacing: 12) {
-        Text("You're hosting")
-          .font(.headline)
-          .foregroundStyle(OCSTheme.text)
+        HStack {
+          Text("You're hosting")
+            .font(.headline)
+            .foregroundStyle(OCSTheme.text)
+          Spacer()
+          Button("Hide") {
+            withAnimation(.easeInOut(duration: 0.2)) { showHostInfo = false }
+          }
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(OCSTheme.accent)
+        }
 
         if model.hostNeedsAttention {
           Text("Room was interrupted in the background — restoring. If the public link dies, tap New public link.")
