@@ -2,8 +2,6 @@ import Foundation
 import Combine
 import UniformTypeIdentifiers
 import UIKit
-import PhotosUI
-import CoreTransferable
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -453,34 +451,23 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func sendPhotosPickerItem(_ item: PhotosPickerItem) async {
-    do {
-      if let movie = try await item.loadTransferable(type: VideoFileTransferable.self) {
-        let data = try Data(contentsOf: movie.url)
-        let name = movie.url.lastPathComponent
-        let mime = UTType(filenameExtension: movie.url.pathExtension)?.preferredMIMEType ?? "video/mp4"
+  func sendVideoFile(url: URL) {
+    Task {
+      do {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+        let name = url.lastPathComponent
+        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "video/mp4"
         try await upload(data: data, name: name, mime: mime)
-        try? FileManager.default.removeItem(at: movie.url)
-        return
+      } catch {
+        toast = error.localizedDescription
+        ocsLog("Video send failed: \(error.localizedDescription)", level: .error)
       }
-      if let data = try await item.loadTransferable(type: Data.self) {
-        let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
-        let ext = mime.contains("png") ? "png" : (mime.contains("heic") ? "heic" : "jpg")
-        try await upload(
-          data: data,
-          name: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)",
-          mime: mime
-        )
-        return
-      }
-      toast = "Could not load media"
-    } catch {
-      toast = error.localizedDescription
-      ocsLog("Media send failed: \(error.localizedDescription)", level: .error)
     }
   }
 
-  private func upload(data: Data, name: String, mime: String) async throws {
+  func upload(data: Data, name: String, mime: String) async throws {
     guard room != nil else { throw URLError(.notConnectedToInternet) }
     if isHosting {
       uploadLabel = "Sharing \(name)"

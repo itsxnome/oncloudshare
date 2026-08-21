@@ -25,6 +25,15 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.3.1",
+      date: "2026-08-21",
+      title: "Fix IPA build / updates",
+      items: [
+        "Fixed compile error that blocked the 1.3.0 IPA (updates can fetch again)",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.3.0",
       date: "2026-08-21",
       title: "Save, copy, paste & drop",

@@ -511,7 +511,23 @@ struct RoomView: View {
     .onChange(of: photoItem) { item in
       guard let item else { return }
       Task {
-        await model.sendPhotosPickerItem(item)
+        do {
+          if let movie = try await item.loadTransferable(type: VideoFileTransferable.self) {
+            model.sendVideoFile(url: movie.url)
+          } else if let data = try await item.loadTransferable(type: Data.self) {
+            let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+            let ext = mime.contains("png") ? "png" : (mime.contains("heic") ? "heic" : "jpg")
+            model.sendImageData(
+              data,
+              name: "photo-\(Int(Date().timeIntervalSince1970)).\(ext)",
+              mime: mime
+            )
+          } else {
+            model.toast = "Could not load media"
+          }
+        } catch {
+          model.toast = error.localizedDescription
+        }
         photoItem = nil
       }
     }
