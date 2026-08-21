@@ -382,7 +382,9 @@ struct RoomView: View {
         Menu {
           Button("Copy room code") { model.copyRoomCode() }
           if model.isHosting {
-            Button("Copy share link") { model.copyHostLink() }
+            Button(model.shortShareURL != nil ? "Copy short link" : "Copy share link") {
+              model.copyShortLink()
+            }
             if model.tunnelStatus != .active {
               Button("Enable public link") {
                 model.hostPublic = true
