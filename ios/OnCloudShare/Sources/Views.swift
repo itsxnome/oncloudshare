@@ -516,7 +516,7 @@ struct HostInfoCard: View {
               .font(.caption.monospaced())
               .foregroundStyle(OCSTheme.accent)
               .textSelection(.enabled)
-            Text("Temporary free tunnel (loca.lt). Prefer sharing from the app. Keep OnCloudShare open — switching apps can pause the room; it should restore when you come back.")
+            Text("Guests can open this link in Chrome (PC or phone) and join in the browser — or use the OnCloudShare app. Keep this app open while hosting.")
               .font(.caption2)
               .foregroundStyle(OCSTheme.muted)
           }

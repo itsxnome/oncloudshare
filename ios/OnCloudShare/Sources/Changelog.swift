@@ -25,6 +25,16 @@ enum Changelog {
       upcoming: true
     ),
     ChangelogEntry(
+      version: "1.2.5",
+      date: "2026-08-21",
+      title: "Browser join for iPhone-hosted rooms",
+      items: [
+        "PC/phone Chrome can join an iPhone-hosted public room (no desktop app required)",
+        "Auto-join from share link ?code=",
+      ],
+      upcoming: false
+    ),
+    ChangelogEntry(
       version: "1.2.4",
       date: "2026-08-21",
       title: "Keep hosting alive in background",

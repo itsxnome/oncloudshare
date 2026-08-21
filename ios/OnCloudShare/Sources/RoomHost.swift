@@ -302,16 +302,29 @@ final class RoomHost {
       peer.sendHTTP(status: 200, body: jsonString(payload))
       return
     }
-    if path == "/" || path == "/m" || path.hasPrefix("/m") {
-      peer.sendHTTP(
-        status: 200,
-        headers: ["Content-Type": "text/html; charset=utf-8"],
-        body: Self.landingHTML(
+    if path == "/" || path == "/m" || path.hasPrefix("/m") || path == "/index.html" {
+      let html = Self.webClientHTML()
+        ?? Self.landingHTML(
           roomName: roomName,
           code: roomCode,
           hostName: hostName,
           queryCode: request.query["code"]
         )
+      peer.sendHTTP(
+        status: 200,
+        headers: [
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        ],
+        body: html
+      )
+      return
+    }
+    if path == "/sw.js" {
+      peer.sendHTTP(
+        status: 200,
+        headers: ["Content-Type": "application/javascript; charset=utf-8"],
+        body: "/* no service worker on iOS host */\n"
       )
       return
     }
@@ -320,6 +333,20 @@ final class RoomHost {
       return
     }
     peer.sendHTTP(status: 404, body: "{\"error\":\"Not found\"}")
+  }
+
+  private static func webClientHTML() -> String? {
+    if let url = Bundle.main.url(forResource: "JoinClient", withExtension: "html"),
+       let html = try? String(contentsOf: url, encoding: .utf8)
+    {
+      return html
+    }
+    if let url = Bundle.main.url(forResource: "index", withExtension: "html"),
+       let html = try? String(contentsOf: url, encoding: .utf8)
+    {
+      return html
+    }
+    return nil
   }
 
   private static func landingHTML(roomName: String, code: String, hostName: String, queryCode: String?) -> String {
@@ -349,13 +376,13 @@ final class RoomHost {
       <h1>\(esc(roomName))</h1>
       <p class="muted">Hosted by \(esc(hostName)) · OnCloudShare</p>
       <div class="code">\(esc(shown))</div>
-      <p class="muted">Chrome cannot join the live room by itself. Use the OnCloudShare app (phone or PC).</p>
+      <p class="muted">Browser join client missing from this build. Update OnCloudShare on the host phone, or join with the app.</p>
       <ol class="muted">
-        <li>Open <strong>OnCloudShare</strong></li>
-        <li>Paste this page’s URL into <strong>Share link</strong></li>
-        <li>Room code should fill in automatically — tap <strong>Join room</strong></li>
+        <li>Open <strong>OnCloudShare</strong> on PC or another phone</li>
+        <li>Paste this URL into <strong>Share link</strong></li>
+        <li>Tap <strong>Join room</strong></li>
       </ol>
-      <div class="warn">If you saw a localtunnel warning first: enter the IP once, tap Continue, then use the app. That page is from the free public tunnel — not OnCloudShare.</div>
+      <div class="warn">Room code: \(esc(shown)). If you saw a localtunnel warning first: enter the IP, tap Continue, then refresh.</div>
     </div>
     </body></html>
     """
